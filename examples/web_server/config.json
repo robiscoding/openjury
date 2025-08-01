@@ -1,0 +1,70 @@
+{
+    "name": "Legal Advice Jury",
+    "description": "Evaluates legal question responses for accuracy, clarity, sound legal reasoning, practical application, and ethical considerations.",
+    "criteria": [
+      {
+        "name": "factuality",
+        "description": "Is the legal information provided correct, up-to-date, and supported by relevant law?",
+        "weight": 2.0,
+        "max_score": 5
+      },
+      {
+        "name": "clarity",
+        "description": "Is the response clearly explained and understandable for someone without a legal background?",
+        "weight": 1.5,
+        "max_score": 5
+      },
+      {
+        "name": "reasoning",
+        "description": "Does the answer demonstrate logical, well-structured legal analysis?",
+        "weight": 1.5,
+        "max_score": 5
+      },
+      {
+        "name": "relevance",
+        "description": "Does the response directly address the user's specific legal question and context?",
+        "weight": 1.0,
+        "max_score": 5
+      }
+    ],
+    "jurors": [
+      {
+        "name": "Licensed Attorney",
+        "model_name": "anthropic/claude-3-opus:free",
+        "system_prompt": "You are a licensed attorney. Evaluate legal answers for accuracy, compliance, and ethical guidance. Focus on supporting claims with legal principles.",
+        "temperature": 0.2,
+        "weight": 2.0
+      },
+      {
+        "name": "Client Perspective",
+        "model_name": "openai/gpt-4:free",
+        "system_prompt": "You are a client seeking legal advice. Judge responses based on clarity, practicality, and whether the answer would help you understand your legal situation.",
+        "temperature": 0.4,
+        "weight": 1.0
+      },
+      {
+        "name": "Legal Scholar",
+        "model_name": "mistralai/mixtral-8x7b-instruct:free",
+        "system_prompt": "You are a legal scholar focused on critical analysis and sound legal reasoning. Pay attention to logical structure, use of precedent, and analytical depth.",
+        "temperature": 0.3,
+        "weight": 1.5
+      },
+      {
+        "name": "Ethics Officer",
+        "model_name": "meta-llama/llama-3-8b-instruct:free",
+        "system_prompt": "You are a legal ethics officer. Pay special attention to whether responses give responsible and ethical guidance, avoiding unauthorized practice of law.",
+        "temperature": 0.2,
+        "weight": 1.5
+      },
+      {
+        "name": "Real-World Practitioner",
+        "model_name": "google/gemma-7b-it:free",
+        "system_prompt": "You are a practicing attorney with daily experience advising clients. Focus on actionable, practical guidance and real-world relevance.",
+        "temperature": 0.3,
+        "weight": 1.5
+      }
+    ],
+    "voting_method": "consensus",
+    "require_explanation": true,
+    "max_retries": 3
+  }

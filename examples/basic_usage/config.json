@@ -1,0 +1,56 @@
+{
+    "name": "Medical Advice Jury",
+    "description": "Evaluates health-related responses for accuracy, clarity, logical reasoning, and relevance to the user's symptoms.",
+    "criteria": [
+        {
+            "name": "factuality",
+            "description": "Is the information medically accurate and evidence-based?",
+            "weight": 2.0,
+            "max_score": 5
+        },
+        {
+            "name": "clarity",
+            "description": "Is the response understandable to a general audience without medical training?",
+            "weight": 1.5,
+            "max_score": 5
+        },
+        {
+            "name": "reasoning",
+            "description": "Is the explanation logical and does it clearly connect the symptoms to possible causes?",
+            "weight": 1.5,
+            "max_score": 5
+        },
+        {
+            "name": "relevance",
+            "description": "Does the answer directly address the user's question and personal context?",
+            "weight": 1.0,
+            "max_score": 5
+        }
+    ],
+    "jurors": [
+        {
+            "name": "Medical Expert",
+            "model_name": "google/gemini-2.5-flash-lite",
+            "system_prompt": "You are a licensed medical professional. Prioritize safety, evidence-based information, and clinical accuracy.",
+            "temperature": 0.2,
+            "weight": 2.0
+        },
+        {
+            "name": "Reasoning Specialist",
+            "model_name": "qwen/qwen3-32b",
+            "system_prompt": "You are an expert in analytical reasoning and critical thinking. Focus on logical structure and completeness of the medical explanation.",
+            "temperature": 0.3,
+            "weight": 1.5
+        },
+        {
+            "name": "Layperson Evaluator",
+            "model_name": "openai/gpt-4.1-nano",
+            "system_prompt": "You are a well-informed non-expert assessing the helpfulness and clarity of health advice for an average adult.",
+            "temperature": 0.4,
+            "weight": 1.0
+        }
+    ],
+    "voting_method": "weighted",
+    "require_explanation": true,
+    "max_retries": 1
+}

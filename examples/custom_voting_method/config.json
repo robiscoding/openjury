@@ -1,0 +1,51 @@
+{
+  "name": "Finance Advice Jury",
+  "description": "Evaluates personal finance responses for accuracy, clarity, practical reasoning, and alignment with user goals.",
+  "criteria": [
+    {
+      "name": "factuality",
+      "description": "Is the financial information accurate, up-to-date, and free of misleading claims?",
+      "weight": 1.5,
+      "max_score": 5
+    },
+    {
+      "name": "clarity",
+      "description": "Is the response clearly explained and easy for someone with no financial background to understand?",
+      "weight": 1.0,
+      "max_score": 4
+    },
+    {
+      "name": "reasoning",
+      "description": "Does the response logically explain trade-offs, options, and align with the user's goals?",
+      "weight": 1.5,
+      "max_score": 5
+    }
+  ],
+  "jurors": [
+    {
+      "name": "Financial Advisor",
+      "model_name": "qwen/qwen3-4b:free",
+      "system_prompt": "You are a certified financial advisor. Evaluate each response for accuracy, safety, and alignment with long-term financial planning best practices.",
+      "temperature": 0.2,
+      "weight": 2.0
+    },
+    {
+      "name": "New Investor Perspective",
+      "model_name": "moonshotai/kimi-dev-72b:free",
+      "system_prompt": "You are a beginner investor who values simple, practical advice. Judge responses based on how understandable and helpful they are for someone new to personal finance.",
+      "temperature": 0.4,
+      "weight": 1.0
+    },
+    {
+      "name": "Analytical Economist",
+      "model_name": "mistralai/devstral-small-2505:free",
+      "system_prompt": "You are a macroeconomics analyst focusing on personal finance trends and decision-making logic. Emphasize sound reasoning, trade-off analysis, and risk-awareness in your evaluations.",
+      "temperature": 0.3,
+      "weight": 1.5
+    }
+  ],
+  "voting_method": "custom",
+  "custom_voting_function": "unanimous_priority",
+  "require_explanation": false,
+  "max_retries": 1
+}
