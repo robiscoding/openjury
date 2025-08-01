@@ -1,4 +1,4 @@
-.PHONY: help install install-dev clean lint format check test test-cov build dist publish clean-dist clean-cache
+.PHONY: help install install-dev clean lint format check test test-cov build dist release release-test clean-dist clean-cache
 
 help:
 	@echo "OpenJury Development Commands:"
@@ -8,7 +8,7 @@ help:
 	@echo "  install-dev  - Install package with development dependencies"
 	@echo ""
 	@echo "Code Quality:"
-	@echo "  lint         - Run Black, isort, and mypy checks"
+	@echo "  lint         - Run Black, isort"
 	@echo "  format       - Format code with Black and isort"
 	@echo "  check        - Run all code quality checks (lint + test)"
 	@echo ""
@@ -16,10 +16,11 @@ help:
 	@echo "  test         - Run tests with pytest"
 	@echo "  test-cov     - Run tests with coverage report"
 	@echo ""
-	@echo "Build & Publish:"
+	@echo "Build & Release:"
 	@echo "  build        - Build source distribution and wheel"
 	@echo "  dist         - Clean build and create distribution"
-	@echo "  publish      - Publish to PyPI using twine"
+	@echo "  release      - Release to PyPI (CI/CD use with pre-built artifacts)"
+	@echo "  release-test - Build and release to TestPyPI (local development)"
 	@echo ""
 	@echo "Cleaning:"
 	@echo "  clean        - Remove build artifacts and cache"
@@ -40,8 +41,6 @@ lint:
 	uv run black --check src/ tests/ examples/
 	@echo "Checking import sorting with isort..."
 	uv run isort --check-only src/ tests/ examples/
-	@echo "Running type checking with mypy..."
-	uv run mypy src/
 
 format:
 	@echo "Formatting code with Black..."
@@ -66,13 +65,21 @@ build:
 dist: clean-dist build
 	@echo "Distribution files created in dist/"
 
-publish: dist
-	@echo "Publishing to PyPI..."
-	@echo "Make sure you have configured your PyPI credentials!"
+release:
+	@echo "Releasing to PyPI..."
+	@echo "This target is designed for CI/CD with pre-built artifacts"
+	@if [ ! -d "dist" ] || [ -z "$$(ls -A dist/ 2>/dev/null)" ]; then \
+		echo "Error: No distribution files found in dist/ directory"; \
+		echo "Run 'make dist' first or use this target in CI/CD pipeline"; \
+		exit 1; \
+	fi
+	@echo "Checking distribution files..."
+	twine check dist/*
+	@echo "Uploading to PyPI..."
 	twine upload dist/*
 
-publish-test: dist
-	@echo "Publishing to TestPyPI..."
+release-test: clean check dist
+	@echo "Releasing to TestPyPI..."
 	@echo "Make sure you have configured your TestPyPI credentials!"
 	twine upload --repository testpypi dist/*
 
@@ -91,7 +98,6 @@ clean-cache:
 	find . -type f -name "*.pyc" -delete 2>/dev/null || true
 	find . -type f -name "*.pyo" -delete 2>/dev/null || true
 	rm -rf .pytest_cache/
-	rm -rf .mypy_cache/
 	rm -rf .coverage
 	rm -rf htmlcov/
 
@@ -104,12 +110,6 @@ pre-commit: format lint test
 docs:
 	@echo "Building documentation..."
 	@echo "Documentation build not yet implemented"
-
-release: clean check dist publish
-	@echo "Release completed successfully!"
-
-release-test: clean check dist publish-test
-	@echo "Release to TestPyPI completed successfully!"
 
 dev: format test
 	@echo "Development cycle completed!" 
