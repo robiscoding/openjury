@@ -109,6 +109,21 @@ print(f"Confidence: {verdict.final_verdict.confidence:.2%}")
 
 You can find more examples in the [examples](examples) directory.
 
+### CLI Usage
+
+OpenJury also provides a lightweight CLI for quick evaluations:
+
+```bash
+# Run an evaluation
+openjury run --config jury_config.json --prompt "Write a Python function" --responses "def func(): pass" "def func(): return None"
+
+# List jurors from a config
+openjury list-jurors --config jury_config.json
+
+# Export results to CSV
+openjury export-results --input results.json --output results.csv --format csv
+```
+
 ### Use Cases
 
 #### Model Evaluation & Comparison
