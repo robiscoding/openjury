@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Python SDK for evaluating multiple model outputs using configurable LLM-based jurors"
 authors = [{ name = "robiscoding", email = "robiscodingg@gmail.com" }]
 readme = "README.md"
-license = {text = "Apache-2.0"}
+license = { text = "Apache-2.0" }
 requires-python = ">=3.11"
 keywords = [
     "llm",
@@ -15,7 +15,7 @@ keywords = [
     "model-comparison",
     "openai",
     "langchain",
-    "machine-learning"
+    "machine-learning",
 ]
 classifiers = [
     "Development Status :: 3 - Alpha",
@@ -31,7 +31,12 @@ dependencies = [
     "langchain-openai>=0.1.0",
     "openai>=1.0.0",
     "pydantic>=2.0.0",
+    "typer>=0.16.0",
+    "rich>=13.0.0",
 ]
+
+[project.scripts]
+openjury = "openjury.cli:app"
 
 [build-system]
 requires = ["hatchling"]

@@ -1,5 +1,3 @@
-"""OpenJury: A modular framework for evaluating multiple model outputs using LLM-based jurors."""
-
 from openjury.config import (
     CriterionConfig,
     JurorConfig,
@@ -16,6 +14,7 @@ from openjury.voting import (
     VotingMethod,
     VotingResult,
 )
+from openjury.cli import cli_app
 
 __version__ = "0.1.0"
 __all__ = [
@@ -32,4 +31,5 @@ __all__ = [
     "VotingResult",
     "VotingCriteria",
     "ResponseCandidate",
+    "cli_app",
 ]
