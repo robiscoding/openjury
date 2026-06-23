@@ -1,92 +1,110 @@
 from typing import List, Optional
 
-from openjury.config import CriterionConfig, ResponseCandidate
+from openjury.config import AgentResponse, CriterionConfig
 
 
 class PromptTemplate:
 
-    DEFAULT_SYSTEM_PROMPT = """You are an expert evaluator tasked with judging the quality of responses.
-You will evaluate responses based on specific criteria and provide scores with explanations.
+    DEFAULT_SYSTEM_PROMPT = """You are an expert evaluator tasked with judging the quality of an agent's response.
+You will score the response based on specific criteria and provide explanations for each score.
 Be objective, fair, and consistent in your evaluations."""
 
-    DEFAULT_EVALUATION_TEMPLATE = """Please evaluate the following responses to the given prompt.
+    DEFAULT_EVALUATION_TEMPLATE = """Please evaluate the following agent response to the given prompt.
 
-**Original Prompt:**
+**Prompt:**
 {prompt}
 
-**Responses to Evaluate:**
-{responses}
+{references_section}{case_rules_section}**Agent Response:**
+{response}
 
-**Evaluation Criteria:**
+**Evaluation Criteria (score each 1-{score_scale}):**
 {criteria}
 
 **Instructions:**
-1. Rate each response for each criterion on a scale of 1 to {max_score}
+1. Rate the response for each criterion on a scale of 1 to {score_scale}
 2. Provide a brief explanation for each score
 3. Be objective and consider only the quality relative to the criteria
-4. Format your response as JSON with the following structure:
+4. Return JSON only — no markdown fences, no extra text:
 
-```json
 {{
-  "evaluations": [
-    {{
-      "response_id": "response_1", 
-      "scores": {{
-        "{example_criterion_name}": {{
-          "score": X,
-          "explanation": "Brief explanation for this score"
-        }}
-      }},
-      "overall_comment": "Optional overall comment about this response"
+  "scores": {{
+    "{example_criterion_name}": {{
+      "score": X,
+      "explanation": "Brief explanation for this score"
     }}
-  ]
-}}
-```
+  }},
+  "overall_comment": "Optional overall comment about this response"
+}}"""
 
-Please provide your evaluation now."""
+    @classmethod
+    def auxiliary_sections(
+        cls,
+        references: Optional[str] = None,
+        case_rules: Optional[str] = None,
+    ) -> tuple[str, str]:
+        ref = (references or "").strip()
+        rules = (case_rules or "").strip()
+        references_section = ""
+        if ref:
+            references_section = (
+                "**Evaluation references (examples for calibration):**\n" f"{ref}\n\n"
+            )
+        case_rules_section = ""
+        if rules:
+            case_rules_section = (
+                "**Additional rules for this evaluation:**\n" f"{rules}\n\n"
+            )
+        return references_section, case_rules_section
 
     @classmethod
     def format_criteria(cls, criteria: List[CriterionConfig]) -> str:
-        criteria_text = []
+        lines: List[str] = []
         for i, criterion in enumerate(criteria, 1):
-            criteria_text.append(
-                f"{i}. **{criterion.name.name}** (Weight: {criterion.weight}): {criterion.description}"
+            lines.append(
+                f"{i}. **{criterion.name}** (weight: {criterion.weight}): "
+                f"{criterion.description}"
             )
-        return "\n".join(criteria_text)
+            if criterion.rubric:
+                lines.append("   Score anchors:")
+                for level, anchor in sorted(
+                    criterion.rubric.items(), key=lambda x: x[0]
+                ):
+                    lines.append(f"     {level} — {anchor}")
+        return "\n".join(lines)
 
     @classmethod
-    def format_responses(cls, responses: List[ResponseCandidate]) -> str:
-        response_text = []
-        for i, response in enumerate(responses, 1):
-            display_name = response.get_display_name()
-            model_info = (
-                f" (Model: {response.model_name})" if response.model_name else ""
-            )
-            response_text.append(
-                f"**Response {i} - {display_name}{model_info}:**\n{response.content}\n"
-            )
-        return "\n".join(response_text)
+    def format_response(cls, response: AgentResponse) -> str:
+        model_info = f" (Model: {response.model_name})" if response.model_name else ""
+        display = response.get_display_name()
+        return f"[{display}{model_info}]\n{response.content}"
 
     @classmethod
     def create_evaluation_prompt(
         cls,
         prompt: str,
-        responses: List[ResponseCandidate],
+        response: AgentResponse,
         criteria: List[CriterionConfig],
         custom_template: Optional[str] = None,
-        max_score: int = 5,
+        score_scale: int = 5,
+        references: Optional[str] = None,
+        case_rules: Optional[str] = None,
     ) -> str:
         template = custom_template or cls.DEFAULT_EVALUATION_TEMPLATE
         formatted_criteria = cls.format_criteria(criteria)
-        formatted_responses = cls.format_responses(responses)
-        example_criterion_name = criteria[0].name.name if criteria else "CRITERION_NAME"
+        formatted_response = cls.format_response(response)
+        example_criterion_name = criteria[0].name if criteria else "criterion_name"
+        references_section, case_rules_section = cls.auxiliary_sections(
+            references, case_rules
+        )
 
         return template.format(
             prompt=prompt,
-            responses=formatted_responses,
+            response=formatted_response,
             criteria=formatted_criteria,
-            max_score=max_score,
+            score_scale=score_scale,
             example_criterion_name=example_criterion_name,
+            references_section=references_section,
+            case_rules_section=case_rules_section,
         )
 
     @classmethod

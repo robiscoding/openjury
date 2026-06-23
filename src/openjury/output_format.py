@@ -1,271 +1,123 @@
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Dict, List, Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
-from openjury.config import JuryConfig
-from openjury.voting import JurorEvaluation, VotingMethod, VotingResult
-
-
-class CriterionScore(BaseModel):
-    score: float
-    explanation: str
-    max_score: int
+from openjury.scoring import ConsistencyResult, JurorScore, ScoredMetrics
 
 
-class ResponseEvaluation(BaseModel):
-    response_id: str
+class CriterionEvaluation(BaseModel):
+    """Aggregated evaluation result for a single criterion across all jurors."""
+
+    weighted_mean_score: float
+    min_juror_score: float
+    max_juror_score: float
+    juror_agreement: float
+    weight: float
+    explanations: Dict[str, str] = Field(default_factory=dict)
+
+
+class TrialResult(BaseModel):
+    """Scores for one trial (one agent response to the prompt)."""
+
+    trial_number: int
     response_text: str
-    scores: Dict[str, CriterionScore]
-    total_score: float
-    average_score: float
-    overall_comment: Optional[str] = None
+    scored_metrics: ScoredMetrics
+    criteria_evaluations: Dict[str, CriterionEvaluation] = Field(default_factory=dict)
+    juror_scores: List[JurorScore] = Field(default_factory=list)
+
+    model_config = {"arbitrary_types_allowed": True}
 
 
-class JurorVerdict(BaseModel):
-    juror_name: str
-    juror_weight: float
-    evaluations: List[ResponseEvaluation]
-    timestamp: datetime
+class AgentEvalResult(BaseModel):
+    """Primary output of an agent evaluation. Quality score always comes from trial 1.
+    If num_trials > 1, consistency_result is populated with reliability metrics."""
 
-
-class FinalVerdict(BaseModel):
-    winner: str
-    winner_margin: Optional[float] = None
-    voting_method: str
-    voting_details: Dict[str, Any]
-    confidence: Optional[float] = None
-
-
-class Verdict(BaseModel):
     jury_name: str
-    jury_description: Optional[str]
-    original_prompt: str
-    timestamp: datetime = datetime.now()
-    responses: Dict[str, str]
-    juror_verdicts: List[JurorVerdict]
-    final_verdict: FinalVerdict
-    summary: Dict[str, Any]
+    prompt: str
+    endpoint_alias: Optional[str] = None
+    model_name: Optional[str] = None
+    score_scale: int
+
+    # Primary quality (trial 1)
+    composite_score: float
+    normalized_composite_score: float
+    scored_metrics: ScoredMetrics
+    criteria_evaluations: Dict[str, CriterionEvaluation] = Field(default_factory=dict)
+    juror_scores: List[JurorScore] = Field(default_factory=list)
+    has_custom_score: bool = False
+
+    # Consistency audit (num_trials > 1 only)
+    consistency_result: Optional[ConsistencyResult] = None
+    trial_results: List[TrialResult] = Field(default_factory=list)
+
+    timestamp: datetime = Field(default_factory=datetime.now)
+
+    model_config = {"arbitrary_types_allowed": True}
 
 
-class VerdictFormatter:
+class ResultFormatter:
     @staticmethod
-    def format_juror_evaluation(
-        evaluation: JurorEvaluation,
-        responses: Dict[str, str],
-        criteria_configs: Dict[str, Any],
-        explanations: Optional[Dict[str, Dict[str, str]]] = None,
-    ) -> JurorVerdict:
-        response_evals = []
-        for response_id, response_text in responses.items():
-            if response_id in evaluation.response_scores:
-                criterion_scores = {}
-                total_score = 0
-                count = 0
+    def format_result(result: AgentEvalResult) -> str:
+        scale = result.score_scale
+        lines: List[str] = [
+            f"╔══ Quality Evaluation  (scale: 1–{scale}) ══",
+            f"  Jury:              {result.jury_name}",
+            f"  Endpoint:          {result.endpoint_alias or 'n/a'}",
+            f"  Model:             {result.model_name or 'n/a'}",
+            "",
+            f"  composite_score:   {result.composite_score:.2f} / {scale}  "
+            f"({result.normalized_composite_score:.3f} normalized)",
+            "",
+            "  Scoring Metrics:",
+        ]
 
-                for criterion_name, score in evaluation.response_scores[
-                    response_id
-                ].items():
-                    max_score = criteria_configs.get(criterion_name, {}).get(
-                        "max_score", 5
-                    )
-                    explanation = ""
+        m = result.scored_metrics
+        metrics_rows = [
+            ("weighted_mean", m.weighted_mean),
+            ("mean", m.mean),
+            ("median", m.median),
+            ("min_score", m.min_score),
+            ("max_score", m.max_score),
+            ("harmonic_mean", m.harmonic_mean),
+            ("weakest_link", m.weakest_link),
+            ("juror_agreement (0–1)", m.juror_agreement),
+        ]
+        if m.custom is not None:
+            metrics_rows.append(("custom", m.custom))
 
-                    if explanations and response_id in explanations:
-                        explanation = explanations[response_id].get(criterion_name, "")
+        for label, value in metrics_rows:
+            lines.append(f"    {label:<28} {value:.3f}")
 
-                    criterion_scores[criterion_name] = CriterionScore(
-                        score=score, explanation=explanation, max_score=max_score
-                    )
-                    total_score += score
-                    count += 1
-
-                avg_score = total_score / count if count > 0 else 0
-
-                response_evals.append(
-                    ResponseEvaluation(
-                        response_id=response_id,
-                        response_text=response_text,
-                        scores=criterion_scores,
-                        total_score=total_score,
-                        average_score=avg_score,
-                    )
+        if result.criteria_evaluations:
+            lines.append("")
+            lines.append("  Criteria Breakdown:")
+            for cname, ce in result.criteria_evaluations.items():
+                lines.append(
+                    f"    {cname} (weight {ce.weight:.1f}):  "
+                    f"{ce.weighted_mean_score:.2f}  "
+                    f"[agreement: {ce.juror_agreement:.2f}  "
+                    f"min: {ce.min_juror_score:.1f}  "
+                    f"max: {ce.max_juror_score:.1f}]"
                 )
+                for juror_name, expl in ce.explanations.items():
+                    snippet = expl[:100].replace("\n", " ")
+                    lines.append(f'      {juror_name}: "{snippet}"')
 
-        return JurorVerdict(
-            juror_name=evaluation.juror_name,
-            juror_weight=evaluation.juror_weight,
-            evaluations=response_evals,
-            timestamp=datetime.now(),
-        )
-
-    @staticmethod
-    def calculate_confidence(
-        voting_result: VotingResult, juror_verdicts: List[JurorVerdict]
-    ) -> float:
-        if voting_result.method == VotingMethod.MAJORITY:
-            vote_counts = voting_result.vote_counts
-            total_votes = sum(vote_counts.values())
-            winner_votes = vote_counts.get(voting_result.winner, 0)
-            return winner_votes / total_votes if total_votes > 0 else 0.0
-
-        elif voting_result.method == VotingMethod.AVERAGE:
-            scores = voting_result.average_scores
-            if len(scores) < 2:
-                return 1.0
-            sorted_scores = sorted(scores.values(), reverse=True)
-            winner_score = sorted_scores[0]
-            runner_up_score = sorted_scores[1] if len(sorted_scores) > 1 else 0
-            max_possible_gap = winner_score
-            actual_gap = winner_score - runner_up_score
-            return (
-                min(actual_gap / max_possible_gap, 1.0) if max_possible_gap > 0 else 1.0
+        if result.consistency_result is not None:
+            cr = result.consistency_result
+            lines.append("")
+            lines.append("  ── Consistency Audit ──")
+            lines.append(f"  trials:      {cr.num_trials}")
+            lines.append(
+                f"  score_std:   {cr.score_std:.3f}  "
+                f"(mean: {cr.score_mean:.2f}  "
+                f"min: {cr.score_min:.2f}  "
+                f"max: {cr.score_max:.2f})"
             )
+            scores_str = ", ".join(f"{s:.2f}" for s in cr.trial_composite_scores)
+            lines.append(f"  trial scores: [{scores_str}]")
+            lines.append(f"  {cr.interpretation}")
 
-        elif voting_result.method == VotingMethod.WEIGHTED:
-            scores = voting_result.weighted_scores
-            if len(scores) < 2:
-                return 1.0
-
-            sorted_scores = sorted(scores.values(), reverse=True)
-            winner_score = sorted_scores[0]
-            runner_up_score = sorted_scores[1] if len(sorted_scores) > 1 else 0
-
-            # Normalize confidence based on score gap
-            max_possible_gap = winner_score
-            actual_gap = winner_score - runner_up_score
-            return (
-                min(actual_gap / max_possible_gap, 1.0) if max_possible_gap > 0 else 1.0
-            )
-
-        elif voting_result.method == VotingMethod.RANKED:
-            scores = voting_result.ranked_scores
-            if len(scores) < 2:
-                return 1.0
-
-            sorted_scores = sorted(scores.values(), reverse=True)
-            winner_score = sorted_scores[0]
-            runner_up_score = sorted_scores[1] if len(sorted_scores) > 1 else 0
-
-            max_possible_gap = winner_score
-            actual_gap = winner_score - runner_up_score
-            return (
-                min(actual_gap / max_possible_gap, 1.0) if max_possible_gap > 0 else 1.0
-            )
-
-        elif voting_result.method == VotingMethod.CONSENSUS:
-            scores = voting_result.consensus_scores
-            if len(scores) < 2:
-                return 1.0
-
-            sorted_scores = sorted(scores.values(), reverse=True)
-            winner_score = sorted_scores[0]
-            runner_up_score = sorted_scores[1] if len(sorted_scores) > 1 else 0
-
-            max_possible_gap = winner_score
-            actual_gap = winner_score - runner_up_score
-            return (
-                min(actual_gap / max_possible_gap, 1.0) if max_possible_gap > 0 else 1.0
-            )
-
-        elif voting_result.method == VotingMethod.CUSTOM:
-            scores = voting_result.custom_scores
-            if scores and len(scores) >= 2:
-                sorted_scores = sorted(scores.values(), reverse=True)
-                winner_score = sorted_scores[0]
-                runner_up_score = sorted_scores[1]
-                max_possible_gap = winner_score
-                actual_gap = winner_score - runner_up_score
-                return (
-                    min(actual_gap / max_possible_gap, 1.0)
-                    if max_possible_gap > 0
-                    else 1.0
-                )
-            else:
-                return 0.75
-
-        else:
-            raise ValueError(f"Unknown voting method: {voting_result.method}")
-
-    @classmethod
-    def create_verdict(
-        cls,
-        jury_config: JuryConfig,
-        original_prompt: str,
-        responses: Dict[str, str],
-        juror_evaluations: List[JurorEvaluation],
-        voting_result: VotingResult,
-        explanations: Optional[Dict[str, Dict[str, Dict[str, str]]]] = None,
-    ) -> Verdict:
-        criteria_configs = {
-            criterion.name: {
-                "max_score": criterion.max_score,
-                "weight": criterion.weight,
-            }
-            for criterion in jury_config.criteria
-        }
-
-        juror_verdicts = []
-        for evaluation in juror_evaluations:
-            juror_explanations = (
-                explanations.get(evaluation.juror_name) if explanations else None
-            )
-            verdict = cls.format_juror_evaluation(
-                evaluation, responses, criteria_configs, juror_explanations
-            )
-            juror_verdicts.append(verdict)
-
-        confidence = cls.calculate_confidence(voting_result, juror_verdicts)
-        winner_margin = None
-        if voting_result.method == VotingMethod.AVERAGE:
-            scores = voting_result.average_scores
-            if len(scores) >= 2:
-                sorted_scores = sorted(scores.values(), reverse=True)
-                winner_margin = sorted_scores[0] - sorted_scores[1]
-        elif voting_result.method == VotingMethod.WEIGHTED:
-            scores = voting_result.weighted_scores
-            if len(scores) >= 2:
-                sorted_scores = sorted(scores.values(), reverse=True)
-                winner_margin = sorted_scores[0] - sorted_scores[1]
-        elif voting_result.method == VotingMethod.RANKED:
-            scores = voting_result.ranked_scores
-            if len(scores) >= 2:
-                sorted_scores = sorted(scores.values(), reverse=True)
-                winner_margin = sorted_scores[0] - sorted_scores[1]
-        elif voting_result.method == VotingMethod.CONSENSUS:
-            scores = voting_result.consensus_scores
-            if len(scores) >= 2:
-                sorted_scores = sorted(scores.values(), reverse=True)
-                winner_margin = sorted_scores[0] - sorted_scores[1]
-        elif voting_result.method == VotingMethod.CUSTOM:
-            scores = voting_result.custom_scores
-            if scores and len(scores) >= 2:
-                sorted_scores = sorted(scores.values(), reverse=True)
-                winner_margin = sorted_scores[0] - sorted_scores[1]
-
-        final_verdict = FinalVerdict(
-            winner=voting_result.winner,
-            winner_margin=winner_margin,
-            voting_method=voting_result.method,
-            voting_details=voting_result.model_dump(),
-            confidence=confidence,
-        )
-
-        summary = {
-            "total_jurors": len(juror_evaluations),
-            "total_responses": len(responses),
-            "total_criteria": len(jury_config.criteria),
-            "voting_method": voting_result.method,
-            "confidence": confidence,
-            "unanimous": confidence == 1.0,
-        }
-
-        return Verdict(
-            jury_name=jury_config.name,
-            jury_description=jury_config.description,
-            original_prompt=original_prompt,
-            responses=responses,
-            juror_verdicts=juror_verdicts,
-            final_verdict=final_verdict,
-            summary=summary,
-        )
+        lines.append("╚══")
+        return "\n".join(lines)

@@ -1,14 +1,15 @@
 import json
 import re
-from typing import Dict, List
+from typing import Dict, List, Optional
 
-from langchain.schema import HumanMessage, SystemMessage
+from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 
-from openjury.config import CriterionConfig, JurorConfig, ResponseCandidate
+from openjury.config import AgentResponse, CriterionConfig, JurorConfig
 from openjury.env import get_env_vars
 from openjury.logger import logger
 from openjury.prompt_templates import PromptTemplate
+from openjury.scoring import JurorScore
 
 
 class JurorException(Exception):
@@ -33,124 +34,108 @@ class Juror:
         self.system_prompt = PromptTemplate.create_system_prompt(config.system_prompt)
 
     def __repr__(self) -> str:
-        return f"Juror(name='{self.name}', model='{self.config.model_name}', weight={self.config.weight})"
+        return (
+            f"Juror(name='{self.name}', model='{self.config.model_name}', "
+            f"weight={self.config.weight})"
+        )
 
     def _parse_evaluation_response(
         self,
         response_text: str,
-        responses: List[ResponseCandidate],
         criteria: List[CriterionConfig],
-    ) -> tuple[Dict[str, Dict[str, float]], Dict[str, Dict[str, str]]]:
+    ) -> tuple[Dict[str, float], Dict[str, str]]:
+        """Parse juror LLM output into criterion scores and explanations.
+
+        Expected JSON shape:
+        {
+          "scores": {
+            "criterion_name": {"score": N, "explanation": "..."}
+          },
+          "overall_comment": "..."
+        }
+        """
+        criterion_names = {c.name for c in criteria}
 
         try:
             json_match = re.search(
-                r"```json\s*(\{.*?\})\s*```", response_text, re.DOTALL
+                r"```(?:json)?\s*(\{.*?\})\s*```", response_text, re.DOTALL
             )
-            if json_match:
-                json_text = json_match.group(1)
-            else:
-                json_text = response_text.strip()
+            json_text = json_match.group(1) if json_match else response_text.strip()
 
-            evaluation_data = json.loads(json_text)
-            scores = {}
-            explanations = {}
-            evaluations = evaluation_data.get("evaluations", [])
-            criterion_names = {criterion.name.name for criterion in criteria}
+            data = json.loads(json_text)
+            scores: Dict[str, float] = {}
+            explanations: Dict[str, str] = {}
 
-            for eval_item in evaluations:
-                response_id = eval_item.get("response_id", "")
+            raw_scores = data.get("scores", {})
+            for criterion_name, score_data in raw_scores.items():
+                normalized = criterion_name.split(".")[-1].lower()
+                matched: Optional[str] = None
+                for cname in criterion_names:
+                    if cname.lower() == normalized:
+                        matched = cname
+                        break
 
-                scores[response_id] = {}
-                explanations[response_id] = {}
+                if matched is None:
+                    continue
 
-                eval_scores = eval_item.get("scores", {})
-                for criterion_name, score_data in eval_scores.items():
-                    normalized_criterion_name = (
-                        criterion_name.split(".")[-1]
-                        if "." in criterion_name
-                        else criterion_name
-                    )
-                    if normalized_criterion_name in criterion_names:
-                        if isinstance(score_data, dict):
-                            score = score_data.get("score", 0)
-                            explanation = score_data.get("explanation", "")
-                        else:
-                            score = float(score_data)
-                            explanation = eval_item.get("overall_comment", "")
-                        scores[response_id][normalized_criterion_name] = float(score)
-                        explanations[response_id][normalized_criterion_name] = str(
-                            explanation
-                        )
+                if isinstance(score_data, dict):
+                    score = float(score_data.get("score", 0))
+                    explanation = str(score_data.get("explanation", ""))
+                else:
+                    score = float(score_data)
+                    explanation = str(data.get("overall_comment", ""))
+
+                scores[matched] = score
+                explanations[matched] = explanation
+
             return scores, explanations
+
         except (json.JSONDecodeError, KeyError, ValueError) as e:
             logger.warning(f"Failed to parse juror response: {e}")
-            logger.warning(f"Response text: {response_text}")
-            return self._fallback_parse(response_text, responses, criteria)
+            logger.warning(f"Response text: {response_text[:500]}")
+            return self._fallback_parse(response_text, criteria)
 
     def _fallback_parse(
         self,
         response_text: str,
-        responses: List[ResponseCandidate],
         criteria: List[CriterionConfig],
-    ) -> tuple[Dict[str, Dict[str, float]], Dict[str, Dict[str, str]]]:
-        scores = {}
-        explanations = {}
-        numbers = re.findall(r"\b([1-5])\b", response_text)
-        num_responses = len(responses)
-        num_criteria = len(criteria)
-        expected_scores = num_responses * num_criteria
+    ) -> tuple[Dict[str, float], Dict[str, str]]:
+        scores: Dict[str, float] = {}
+        explanations: Dict[str, str] = {}
+        numbers = re.findall(r"\b([1-9]|10)\b", response_text)
 
-        if len(numbers) >= expected_scores:
-            score_idx = 0
-            for i in range(num_responses):
-                response_key = responses[i].id
-                scores[response_key] = {}
-                explanations[response_key] = {}
-                for criterion in criteria:
-                    if score_idx < len(numbers):
-                        scores[response_key][criterion.name.name] = float(
-                            numbers[score_idx]
-                        )
-                        explanations[response_key][
-                            criterion.name.name
-                        ] = "Parsed from fallback method"
-                        score_idx += 1
-                    else:
-                        scores[response_key][criterion.name.name] = 3.0
-                        explanations[response_key][
-                            criterion.name.name
-                        ] = "Default score"
-        else:
-            for i in range(num_responses):
-                response_key = responses[i].id
-                scores[response_key] = {}
-                explanations[response_key] = {}
-                for criterion in criteria:
-                    scores[response_key][criterion.name.name] = 3.0
-                    explanations[response_key][
-                        criterion.name.name
-                    ] = "Could not parse score from response"
+        for i, criterion in enumerate(criteria):
+            if i < len(numbers):
+                scores[criterion.name] = float(numbers[i])
+                explanations[criterion.name] = "Parsed from fallback method"
+            else:
+                scores[criterion.name] = 3.0
+                explanations[criterion.name] = "Default score — could not parse"
+
         return scores, explanations
 
     def evaluate(
         self,
         prompt: str,
-        responses: List[ResponseCandidate],
+        response: AgentResponse,
         criteria: List[CriterionConfig],
+        score_scale: int = 5,
         max_retries: int = 1,
-    ) -> tuple[Dict[str, Dict[str, float]], Dict[str, Dict[str, str]]]:
-        if not responses:
-            raise JurorException("No responses provided for evaluation")
-
+        evaluation_template: Optional[str] = None,
+        references: Optional[str] = None,
+        case_rules: Optional[str] = None,
+    ) -> JurorScore:
         if not criteria:
             raise JurorException("No criteria provided for evaluation")
 
-        last_error = None
         evaluation_prompt = PromptTemplate.create_evaluation_prompt(
             prompt=prompt,
-            responses=responses,
+            response=response,
             criteria=criteria,
-            max_score=max(criterion.max_score for criterion in criteria),
+            custom_template=evaluation_template,
+            score_scale=score_scale,
+            references=references,
+            case_rules=case_rules,
         )
 
         messages = [
@@ -158,41 +143,42 @@ class Juror:
             HumanMessage(content=evaluation_prompt),
         ]
 
+        last_error: Optional[Exception] = None
         for attempt in range(max_retries):
             try:
                 logger.debug(f"Juror {self.name} evaluation attempt {attempt + 1}")
-                response = self.llm.invoke(messages)
-                response_text = response.content
-                logger.info(f"Juror {self.name} response: {response_text}")
+                llm_response = self.llm.invoke(messages)
+                response_text = llm_response.content
+                logger.info(f"Juror {self.name} raw response: {response_text[:300]}")
+
                 scores, explanations = self._parse_evaluation_response(
-                    response_text, responses, criteria
+                    response_text, criteria
                 )
-                logger.info(f"Juror {self.name} scores: {scores}")
-                logger.info(f"Juror {self.name} explanations: {explanations}")
 
-                expected_responses = {response.id for response in responses}
-                expected_criteria = {criterion.name.name for criterion in criteria}
+                expected_criteria = {c.name for c in criteria}
+                missing = expected_criteria - scores.keys()
+                if missing:
+                    raise JurorException(
+                        f"Juror {self.name} missing scores for criteria: {missing}"
+                    )
 
-                for response_key in expected_responses:
-                    if response_key not in scores:
-                        raise JurorException(f"Missing scores for {response_key}")
-                    for criterion_name in expected_criteria:
-                        if criterion_name not in scores[response_key]:
-                            raise JurorException(
-                                f"Missing score for {response_key}, criterion {criterion_name}"
-                            )
-                logger.debug(f"Juror {self.name} evaluation successful")
-                return scores, explanations
+                logger.debug(f"Juror {self.name} evaluation successful: {scores}")
+                return JurorScore(
+                    juror_name=self.name,
+                    juror_weight=self.config.weight,
+                    criterion_scores=scores,
+                    criterion_explanations=explanations,
+                )
 
             except Exception as e:
                 last_error = e
-                logger.warning(
-                    f"Juror {self.name} evaluation attempt {attempt + 1} failed: {e}"
-                )
+                logger.warning(f"Juror {self.name} attempt {attempt + 1} failed: {e}")
                 if attempt == max_retries - 1:
                     logger.error(
                         f"Juror {self.name} failed after {max_retries} attempts"
                     )
+
         raise JurorException(
-            f"Juror {self.name} failed to evaluate after {max_retries} attempts. Last error: {last_error}"
+            f"Juror {self.name} failed after {max_retries} attempts. "
+            f"Last error: {last_error}"
         )

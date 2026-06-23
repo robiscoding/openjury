@@ -11,9 +11,10 @@ def test_cli_help():
     )
     assert result.returncode == 0
     assert "OpenJury" in result.stdout
+    assert "batch-eval" in result.stdout
 
 
-def test_cli_list_jurors():
+def test_cli_list_jurors_shows_criteria():
     result = subprocess.run(
         [sys.executable, "-m", "openjury.cli", "list-jurors"],
         capture_output=True,
@@ -21,23 +22,23 @@ def test_cli_list_jurors():
     )
     assert result.returncode == 0
     assert "factuality" in result.stdout
-    assert "majority" in result.stdout
+    assert "majority" not in result.stdout
 
 
 def test_cli_list_jurors_with_config(tmp_path):
     config_data = {
         "name": "Test Jury",
+        "score_scale": 5,
         "criteria": [
-            {"name": "factuality", "description": "Test criterion", "weight": 1.0, "max_score": 5}
-        ],
-        "jurors": [
             {
-                "name": "Test Juror",
-                "model_name": "openai/gpt-4o-mini",
-                "weight": 1.0
+                "name": "helpfulness",
+                "description": "Is the response helpful?",
+                "weight": 1.0,
             }
         ],
-        "voting_method": "weighted"
+        "jurors": [
+            {"name": "Test Juror", "model_name": "openai/gpt-4o-mini", "weight": 1.0}
+        ],
     }
 
     config_file = tmp_path / "test_config.json"
@@ -46,8 +47,12 @@ def test_cli_list_jurors_with_config(tmp_path):
 
     result = subprocess.run(
         [
-            sys.executable, "-m", "openjury.cli", "list-jurors",
-            "--config", str(config_file)
+            sys.executable,
+            "-m",
+            "openjury.cli",
+            "list-jurors",
+            "--config",
+            str(config_file),
         ],
         capture_output=True,
         text=True,
@@ -57,33 +62,45 @@ def test_cli_list_jurors_with_config(tmp_path):
 
 
 def test_cli_export_results(tmp_path):
-    results_data = {
-        "winner": "response_1",
-        "confidence": 0.8,
-        "scores": {
-            "response_1": 4.5,
-            "response_2": 3.2
+    results_data = [
+        {
+            "case_id": "c1",
+            "run_metadata": {"jury_name": "My Jury"},
+            "eval": {
+                "composite_score": 4.2,
+                "normalized_composite_score": 0.84,
+                "score_scale": 5,
+            },
+            "error": None,
         }
-    }
+    ]
 
-    results_file = tmp_path / "results.json"
-    with open(results_file, "w") as f:
-        json.dump(results_data, f)
-
+    results_file = tmp_path / "results.jsonl"
+    results_file.write_text(
+        "\n".join(json.dumps(r) for r in results_data), encoding="utf-8"
+    )
     output_file = tmp_path / "output.csv"
 
     result = subprocess.run(
         [
-            sys.executable, "-m", "openjury.cli", "export-results",
-            "--input", str(results_file),
-            "--output", str(output_file),
-            "--format", "csv"
+            sys.executable,
+            "-m",
+            "openjury.cli",
+            "export-results",
+            "--input",
+            str(results_file),
+            "--output",
+            str(output_file),
+            "--format",
+            "csv",
         ],
         capture_output=True,
         text=True,
     )
     assert result.returncode == 0
     assert output_file.exists()
+    content = output_file.read_text()
+    assert "composite_score" in content
 
 
 def test_cli_list_configs():
@@ -93,4 +110,5 @@ def test_cli_list_configs():
         text=True,
     )
     assert result.returncode == 0
-    assert "Example configuration structure" in result.stdout 
+    assert "Example configuration structure" in result.stdout
+    assert "score_scale" in result.stdout

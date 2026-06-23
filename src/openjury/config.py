@@ -3,74 +3,51 @@ import uuid
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, Field
-
-
-class VotingMethod(str, Enum):
-
-    # Most jurors vote for same winner; simple and fast
-    MAJORITY = "majority"
-
-    # Average score per response across all jurors; balance, ties possible
-    AVERAGE = "average"
-
-    # Jurors have weights, highest weighted score wins; some jurors matter more
-    WEIGHTED = "weighted"
-
-    # Response are ranked, ranks are averaged; handles subjective cases well
-    RANKED = "ranked"
-
-    # Only pick a winner if majority AND scores align; conservative, high-confidence mode
-    CONSENSUS = "consensus"
-
-    # Custom user-defined voting/scoring function
-    CUSTOM = "custom"
+from pydantic import BaseModel, Field, field_validator
 
 
 class VotingCriteria(str, Enum):
+    """Convenience enum of common criterion names. Criterion names are free-form strings;
+    these values are provided as a reference for well-known criteria."""
 
-    # Truthfulness relative to known facts
     FACTUALITY = "factuality"
-
-    # Is it easy to understand?
     CLARITY = "clarity"
-
-    # Is the logic sound and well supported?
     REASONING = "reasoning"
-
-    # Avoids fluff or repetition
     CONCISENESS = "conciseness"
-
-    # Original and creative
     ORIGINALITY = "originality"
-
-    # Relevant to the prompt
     RELEVANCY = "relevance"
-
-    # Style and tone
     STYLE = "style"
-
-    # Contextual and relevant to the prompt
     CONTEXTUALITY = "contextuality"
 
 
 class CriterionConfig(BaseModel):
-
-    name: VotingCriteria = Field(
-        default=VotingCriteria.FACTUALITY, description="Name of the criterion"
-    )
+    name: str = Field(..., description="Name of the criterion (free-form string)")
     description: str = Field(
         ..., description="Description of what this criterion evaluates"
     )
     weight: float = Field(
         default=1.0, ge=0.0, description="Weight for this criterion in scoring"
     )
-    max_score: int = Field(
-        default=5, ge=1, description="Maximum score for this criterion"
+    rubric: Optional[Dict[str, str]] = Field(
+        default=None,
+        description=(
+            "Optional score anchors keyed by score level string (e.g. '1', '3', '5'). "
+            "Providing rubric anchors significantly improves inter-rater reliability "
+            "across different juror models (G-Eval, Liu et al. 2023)."
+        ),
     )
-    custom: bool = Field(
-        default=False, description="Whether this criterion is a custom voting method"
-    )
+
+    @field_validator("name", mode="before")
+    @classmethod
+    def coerce_enum_to_str(cls, v: Any) -> str:
+        if isinstance(v, VotingCriteria):
+            return v.value
+        if isinstance(v, str):
+            # Accept enum member names (e.g. "FACTUALITY") by lowercasing
+            for member in VotingCriteria:
+                if v.upper() == member.name or v.lower() == member.value:
+                    return member.value
+        return str(v)
 
 
 class JurorConfig(BaseModel):
@@ -101,8 +78,29 @@ class JuryConfig(BaseModel):
         ..., description="List of evaluation criteria"
     )
     jurors: List[JurorConfig] = Field(..., description="List of juror configurations")
-    voting_method: VotingMethod = Field(
-        default=VotingMethod.MAJORITY, description="Method for aggregating votes"
+    score_scale: int = Field(
+        default=5,
+        ge=2,
+        le=10,
+        description="Global score scale for all criteria (e.g. 5 means scores range 1–5)",
+    )
+    num_trials: int = Field(
+        default=1,
+        ge=1,
+        le=5,
+        description=(
+            "Number of times to call the agent per prompt. "
+            "num_trials=1 (default): single quality evaluation. "
+            "num_trials>1: consistency audit — measures how reliably the agent "
+            "produces similar-quality responses. Quality score always comes from trial 1."
+        ),
+    )
+    custom_scoring_function: Optional[str] = Field(
+        default=None,
+        description=(
+            "Name of a ScoringFunction registered via ScoreAggregator.register(). "
+            "When set, an additional 'custom' metric is computed alongside the canned metrics."
+        ),
     )
     require_explanation: bool = Field(
         default=True, description="Whether jurors must provide explanations"
@@ -113,9 +111,13 @@ class JuryConfig(BaseModel):
     custom_settings: Dict[str, Any] = Field(
         default_factory=dict, description="Additional custom settings"
     )
-    custom_voting_function: Optional[str] = Field(
+    evaluation_template: Optional[str] = Field(
         default=None,
-        description="Name of custom voting function when using CUSTOM voting method",
+        description=(
+            "Optional override for the evaluation prompt template. "
+            "Must include placeholders: prompt, response, criteria, score_scale, "
+            "example_criterion_name, references_section, case_rules_section."
+        ),
     )
 
     def get_total_juror_weight(self) -> float:
@@ -125,63 +127,24 @@ class JuryConfig(BaseModel):
         return sum(criterion.weight for criterion in self.criteria)
 
     @staticmethod
-    def from_json(
-        json_str: str, custom_voting_class: Optional[Any] = None
-    ) -> "JuryConfig":
-        config = JuryConfig.model_validate_json(json_str)
-        config._register_custom_methods(custom_voting_class)
-        return config
+    def from_json(json_str: str) -> "JuryConfig":
+        return JuryConfig.model_validate_json(json_str)
 
     @staticmethod
-    def from_dict(
-        data: Dict[str, Any], custom_voting_class: Optional[Any] = None
-    ) -> "JuryConfig":
-        config = JuryConfig.model_validate(data)
-        config._register_custom_methods(custom_voting_class)
-        return config
+    def from_dict(data: Dict[str, Any]) -> "JuryConfig":
+        return JuryConfig.model_validate(data)
 
     @staticmethod
-    def from_json_file(
-        file_path: str, custom_voting_class: Optional[Any] = None
-    ) -> "JuryConfig":
+    def from_json_file(file_path: str) -> "JuryConfig":
         try:
             with open(file_path, "r") as f:
                 config_data = json.load(f)
-            return JuryConfig.from_dict(config_data, custom_voting_class)
+            return JuryConfig.from_dict(config_data)
         except Exception as e:
-            print(f"Error loading config from {file_path}: {e}")
-            raise
-
-    def _register_custom_methods(self, custom_voting_class: Optional[Any]) -> None:
-        """Automatically register custom voting methods when using custom voting."""
-        from openjury.voting import VotingAggregator
-
-        if self.voting_method == VotingMethod.CUSTOM and not custom_voting_class:
-            raise ValueError(
-                "Custom voting method selected but no custom voting class provided"
-            )
-
-        if self.voting_method != VotingMethod.CUSTOM or not custom_voting_class:
-            return
-
-        # When using custom voting, the caller needs to provide a class with static methods
-        # that implement the custom voting logic.
-        # This will register all static methods from the providedcustom voting class
-        for attr_name in dir(custom_voting_class):
-            if attr_name.startswith("_"):
-                continue
-            attr = getattr(custom_voting_class, attr_name)
-            if callable(attr):
-                try:
-                    VotingAggregator.register_custom_function(attr_name, attr)
-                    print(f"Registered custom voting method: {attr_name}")
-                except Exception as e:
-                    print(
-                        f"Warning: Failed to register custom method '{attr_name}': {e}"
-                    )
+            raise ValueError(f"Error loading config from {file_path}: {e}") from e
 
 
-class ResponseCandidate(BaseModel):
+class AgentResponse(BaseModel):
     id: str = Field(
         default_factory=lambda: f"response_{uuid.uuid4().hex}",
         description="A unique ID of the response",

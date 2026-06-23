@@ -1,0 +1,54 @@
+{
+  "name": "Consistency Audit Jury",
+  "description": "Evaluates agent response quality and measures response-to-response consistency across multiple trials.",
+  "score_scale": 5,
+  "num_trials": 3,
+  "jurors": [
+    {
+      "name": "Quality Assessor",
+      "model_name": "qwen/qwen3-4b:free",
+      "system_prompt": "You are evaluating the quality of a customer support agent's response. Be consistent and objective.",
+      "temperature": 0.1,
+      "weight": 1.5
+    },
+    {
+      "name": "Customer Perspective",
+      "model_name": "mistralai/devstral-small-2505:free",
+      "system_prompt": "You are a customer receiving support. Judge whether the response actually solves your problem.",
+      "temperature": 0.2,
+      "weight": 1.0
+    }
+  ],
+  "criteria": [
+    {
+      "name": "helpfulness",
+      "description": "Does the response directly resolve the customer's issue?",
+      "weight": 2.0,
+      "rubric": {
+        "1": "Ignores or misunderstands the question",
+        "3": "Partially addresses the question but misses key information",
+        "5": "Completely resolves the customer's issue"
+      }
+    },
+    {
+      "name": "accuracy",
+      "description": "Is the information factually correct?",
+      "weight": 2.0,
+      "rubric": {
+        "1": "Contains factual errors",
+        "3": "Mostly accurate with minor gaps",
+        "5": "Completely accurate"
+      }
+    },
+    {
+      "name": "tone",
+      "description": "Is the response professional and empathetic?",
+      "weight": 1.0,
+      "rubric": {
+        "1": "Rude or dismissive",
+        "3": "Neutral but lacks warmth",
+        "5": "Professional and empathetic"
+      }
+    }
+  ]
+}

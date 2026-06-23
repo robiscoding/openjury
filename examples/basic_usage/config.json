@@ -1,56 +1,54 @@
 {
-    "name": "Medical Advice Jury",
-    "description": "Evaluates health-related responses for accuracy, clarity, logical reasoning, and relevance to the user's symptoms.",
-    "criteria": [
-        {
-            "name": "factuality",
-            "description": "Is the information medically accurate and evidence-based?",
-            "weight": 2.0,
-            "max_score": 5
-        },
-        {
-            "name": "clarity",
-            "description": "Is the response understandable to a general audience without medical training?",
-            "weight": 1.5,
-            "max_score": 5
-        },
-        {
-            "name": "reasoning",
-            "description": "Is the explanation logical and does it clearly connect the symptoms to possible causes?",
-            "weight": 1.5,
-            "max_score": 5
-        },
-        {
-            "name": "relevance",
-            "description": "Does the answer directly address the user's question and personal context?",
-            "weight": 1.0,
-            "max_score": 5
-        }
-    ],
+    "name": "Customer Support Jury",
+    "description": "Evaluates the quality of a customer support agent's response",
+    "score_scale": 5,
+    "num_trials": 1,
     "jurors": [
         {
-            "name": "Medical Expert",
-            "model_name": "google/gemini-2.5-flash-lite",
-            "system_prompt": "You are a licensed medical professional. Prioritize safety, evidence-based information, and clinical accuracy.",
-            "temperature": 0.2,
-            "weight": 2.0
+            "name": "Juror A",
+            "model_name": "openrouter/sonnet-3.5-sonnet",
+            "temperature": 0.1,
+            "weight": 1.0
         },
         {
-            "name": "Reasoning Specialist",
-            "model_name": "qwen/qwen3-32b",
-            "system_prompt": "You are an expert in analytical reasoning and critical thinking. Focus on logical structure and completeness of the medical explanation.",
-            "temperature": 0.3,
-            "weight": 1.5
-        },
-        {
-            "name": "Layperson Evaluator",
-            "model_name": "openai/gpt-4.1-nano",
-            "system_prompt": "You are a well-informed non-expert assessing the helpfulness and clarity of health advice for an average adult.",
-            "temperature": 0.4,
+            "name": "Juror B",
+            "model_name": "openai/gpt-4o-mini",
+            "temperature": 0.1,
             "weight": 1.0
         }
     ],
-    "voting_method": "weighted",
-    "require_explanation": true,
-    "max_retries": 1
+    "criteria": [
+        {
+            "name": "helpfulness",
+            "description": "Does the response directly address and resolve the customer's issue?",
+            "weight": 2.0,
+            "rubric": {
+                "1": "Response ignores or misunderstands the customer's question entirely",
+                "2": "Response acknowledges the question but provides no useful resolution",
+                "3": "Response partially addresses the question but misses key information",
+                "4": "Response addresses the question well with minor gaps",
+                "5": "Response directly and completely resolves the customer's issue"
+            }
+        },
+        {
+            "name": "accuracy",
+            "description": "Is the information provided factually correct and consistent with policy?",
+            "weight": 2.0,
+            "rubric": {
+                "1": "Response contains multiple factual errors or contradicts policy",
+                "3": "Response is mostly accurate with minor factual gaps",
+                "5": "Response is completely accurate and fully aligned with policy"
+            }
+        },
+        {
+            "name": "tone",
+            "description": "Is the response professional, empathetic, and appropriate in tone?",
+            "weight": 1.0,
+            "rubric": {
+                "1": "Tone is rude, dismissive, or inappropriate",
+                "3": "Tone is neutral but lacks empathy or warmth",
+                "5": "Tone is professional, empathetic, and perfectly calibrated"
+            }
+        }
+    ]
 }
