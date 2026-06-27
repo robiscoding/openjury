@@ -1,0 +1,35 @@
+{
+  "name": "OpenRouter Jury",
+  "description": "Single OpenRouter key routes all jurors to one model. Good default when you want cheap/free models or easy model swaps without changing juror entries.",
+  "score_scale": 5,
+  "llm_provider": {
+    "provider": "openai_compatible",
+    "model_name": "openai/gpt-4o-mini",
+    "api_key": "${OPENROUTER_API_KEY}",
+    "base_url": "https://openrouter.ai/api/v1"
+  },
+  "jurors": [
+    {
+      "name": "Primary Judge",
+      "temperature": 0.1,
+      "weight": 1.0
+    },
+    {
+      "name": "Secondary Judge",
+      "temperature": 0.1,
+      "weight": 1.0
+    }
+  ],
+  "criteria": [
+    {
+      "name": "helpfulness",
+      "description": "Does the response resolve the user's request?",
+      "weight": 1.0
+    },
+    {
+      "name": "accuracy",
+      "description": "Is the information correct?",
+      "weight": 1.0
+    }
+  ]
+}

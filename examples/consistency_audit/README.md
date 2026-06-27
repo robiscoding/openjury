@@ -2,6 +2,20 @@
 
 Measure how reliably your agent produces similar-quality responses to the same prompt.
 
+## What you'll learn
+
+- Setting `num_trials > 1` for consistency audits
+- Reading `ConsistencyResult.score_std` and trial scores
+- Interpreting variance before deployment
+
+## Prerequisites
+
+| Requirement | Notes |
+|-------------|-------|
+| `OPENROUTER_API_KEY` or `OPENAI_API_KEY` | Per your config |
+| `AGENT_API_KEY` | Agent endpoint auth |
+| Agent or mock | `python ../tools/mock_agent.py --port 8080` |
+
 ## What is a consistency audit?
 
 A standard evaluation (`num_trials=1`) answers: *"How good is this response?"*
@@ -78,7 +92,11 @@ openjury run \
   --config config.json \
   --endpoints-config ../basic_usage/endpoints.json \
   --prompt "My order hasn't arrived. What should I do?" \
-  --consistency-trials 2   # adds 2 extra trials (total = config.num_trials + 2)
+  --consistency-trials 2   # total trials = 1 + 2 = 3 (overrides config num_trials)
 ```
 
-`--consistency-trials` in the CLI adds extra trials on top of the value set in `config.json`. Set `num_trials: 1` in the config and use `--consistency-trials` to opt into consistency mode at the CLI level.
+When `--consistency-trials N` is greater than zero, the CLI sets `num_trials` to `1 + N`, replacing whatever is in `config.json`. Set `num_trials: 1` in the config and use `--consistency-trials` to opt into consistency mode at the CLI level.
+
+## Next steps
+
+- [recipes/consistency-audit-before-ship.md](../../recipes/consistency-audit-before-ship.md)

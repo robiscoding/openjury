@@ -29,6 +29,11 @@ def test_cli_list_jurors_with_config(tmp_path):
     config_data = {
         "name": "Test Jury",
         "score_scale": 5,
+        "llm_provider": {
+            "provider": "openai_compatible",
+            "model_name": "openai/gpt-4o-mini",
+            "api_key": "test-api-key",
+        },
         "criteria": [
             {
                 "name": "helpfulness",
@@ -36,9 +41,7 @@ def test_cli_list_jurors_with_config(tmp_path):
                 "weight": 1.0,
             }
         ],
-        "jurors": [
-            {"name": "Test Juror", "model_name": "openai/gpt-4o-mini", "weight": 1.0}
-        ],
+        "jurors": [{"name": "Test Juror", "weight": 1.0}],
     }
 
     config_file = tmp_path / "test_config.json"

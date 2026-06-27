@@ -1,0 +1,44 @@
+{
+  "name": "Per-Juror Provider Jury",
+  "description": "No jury-level llm_provider — every juror specifies its own full provider bundle. Use when jurors always use different providers and you don't want a shared default.",
+  "score_scale": 5,
+  "jurors": [
+    {
+      "name": "OpenAI Judge",
+      "model_name": "gpt-4o-mini",
+      "provider": "openai_compatible",
+      "api_key": "${OPENAI_API_KEY}",
+      "temperature": 0.1,
+      "weight": 1.0
+    },
+    {
+      "name": "Anthropic Judge",
+      "model_name": "claude-sonnet-4-20250514",
+      "provider": "anthropic",
+      "api_key": "${ANTHROPIC_API_KEY}",
+      "temperature": 0.1,
+      "weight": 1.0
+    },
+    {
+      "name": "xAI Judge",
+      "model_name": "grok-3",
+      "provider": "openai_compatible",
+      "api_key": "${XAI_API_KEY}",
+      "base_url": "https://api.x.ai/v1",
+      "temperature": 0.1,
+      "weight": 1.0
+    }
+  ],
+  "criteria": [
+    {
+      "name": "helpfulness",
+      "description": "Does the response resolve the user's request?",
+      "weight": 1.0
+    },
+    {
+      "name": "accuracy",
+      "description": "Is the information correct?",
+      "weight": 1.0
+    }
+  ]
+}

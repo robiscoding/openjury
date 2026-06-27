@@ -38,6 +38,11 @@ prompt → your agent endpoint → response text
   "name": "My Jury",
   "score_scale": 5,
   "num_trials": 1,
+  "llm_provider": {
+    "provider": "openai_compatible",
+    "model_name": "gpt-4o-mini",
+    "api_key": "${OPENAI_API_KEY}"
+  },
   "criteria": [
     {
       "name": "helpfulness",
@@ -53,7 +58,6 @@ prompt → your agent endpoint → response text
   "jurors": [
     {
       "name": "Juror A",
-      "model_name": "openrouter/horizon-alpha",
       "weight": 1.0,
       "temperature": 0.1
     }
@@ -61,15 +65,20 @@ prompt → your agent endpoint → response text
 }
 ```
 
+More real-world setups (OpenRouter, mixed providers, Ollama, etc.): [`../provider_configs/`](../provider_configs/)
+
 **Key fields:**
 
 | Field | Default | Description |
 |-------|---------|-------------|
+| `llm_provider` | required* | Default provider bundle for jurors without a full override |
 | `score_scale` | `5` | All criteria are scored 1–N (global, not per-criterion) |
 | `num_trials` | `1` | `1` = normal quality eval; `> 1` = consistency audit (see `consistency_audit/`) |
 | `criteria[].rubric` | `null` | Explicit score anchors per level. Strongly recommended — improves inter-juror reliability |
 | `jurors[].weight` | `1.0` | Relative influence in `weighted_mean`; higher = more authoritative juror |
 | `criteria[].weight` | `1.0` | Relative importance in composite score |
+
+\*Required unless every juror sets `model_name`, `api_key`, and `provider` together.
 
 ## Agent endpoint format
 
@@ -118,10 +127,18 @@ Criteria Breakdown:
 - `juror_agreement` near 1.0 means jurors agree — high confidence in the score. Near 0 means the score is contested.
 - `weakest_link` flags when one criterion is a standout failure even if the composite looks okay.
 
+## Prerequisites
+
+| Requirement | Notes |
+|-------------|-------|
+| `OPENAI_API_KEY` | Juror LLM calls (see `config.json`) |
+| `AGENT_API_KEY` | Agent endpoint auth (see `endpoints.json`) |
+| Agent on `:8080` | Or run `python ../tools/mock_agent.py --port 8080` |
+
 ## Running
 
 ```bash
-export OPENROUTER_API_KEY="sk-..."
+export OPENAI_API_KEY="sk-..."
 export AGENT_URL="http://localhost:8080/v1/chat/completions"  # your agent
 
 python basic_jury_run.py
@@ -135,3 +152,9 @@ openjury run \
   --endpoints-config endpoints.json \
   --prompt "How do I reset my password?"
 ```
+
+## Next steps
+
+- [docs/endpoint-config.md](../../docs/endpoint-config.md) — endpoint field reference
+- [recipes/design-rubrics.md](../../recipes/design-rubrics.md) — improve juror agreement
+- [examples/consistency_audit/](../consistency_audit/) — reliability testing

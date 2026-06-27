@@ -1,6 +1,7 @@
 """Scoring aggregation for agent evaluation."""
 
 import statistics
+import warnings
 from dataclasses import dataclass, field
 from typing import Callable, ClassVar, Dict, List, Optional
 
@@ -51,15 +52,41 @@ class ConsistencyResult(BaseModel):
     interpretation: str
 
 
+def _criterion_agreement(scores: List[float]) -> float:
+    """Juror agreement for one criterion: 1 − CoV, clamped to [0, 1].
+
+    Returns 1.0 (perfect agreement) when there is only one juror or the mean is zero.
+    """
+    if len(scores) <= 1:
+        return 1.0
+    mean_c = statistics.mean(scores)
+    if mean_c <= 0:
+        return 1.0
+    cov = statistics.stdev(scores) / mean_c
+    return max(0.0, min(1.0, 1.0 - cov))
+
+
 class ScoreAggregator:
     _custom_functions: ClassVar[Dict[str, ScoringFunction]] = {}
 
     @classmethod
     def register(cls, name: str, fn: ScoringFunction) -> None:
+        """Register a global custom scoring function by name.
+
+        Deprecated: pass custom_scoring_functions={'name': fn} to OpenJury() instead.
+        The global registry is kept for backward compatibility.
+        """
+        warnings.warn(
+            "ScoreAggregator.register() is deprecated. "
+            "Pass custom_scoring_functions={'name': fn} to OpenJury() instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         cls._custom_functions[name] = fn
 
     @classmethod
     def unregister(cls, name: str) -> None:
+        """Remove a globally registered custom scoring function."""
         cls._custom_functions.pop(name, None)
 
     @classmethod
@@ -71,7 +98,7 @@ class ScoreAggregator:
         cls,
         juror_scores: List[JurorScore],
         criteria: List[CriterionConfig],
-        custom_fn_name: Optional[str] = None,
+        custom_fn: Optional[ScoringFunction] = None,
     ) -> ScoredMetrics:
         if not juror_scores:
             raise ValueError("No juror scores provided")
@@ -142,45 +169,23 @@ class ScoreAggregator:
             else 0.0
         )
 
-        # weakest_link: for each criterion, min score across jurors × weight / total_weight;
-        # then take the minimum such weighted score
-        crit_min: Dict[str, float] = {
-            c.name: min(js.criterion_scores.get(c.name, 0.0) for js in juror_scores)
+        # weakest_link: the worst-performing criterion by weighted juror consensus.
+        # Uses the already-computed crit_weighted_avg so weights are applied once and
+        # consistently. The minimum identifies the criterion pulling the score down most.
+        weakest_link = min(crit_weighted_avg.values()) if crit_weighted_avg else 0.0
+
+        # juror_agreement: mean per-criterion agreement, each in [0, 1]
+        crit_agreements = [
+            _criterion_agreement(
+                [js.criterion_scores.get(c.name, 0.0) for js in juror_scores]
+            )
             for c in criteria
-        }
-        weakest_link = (
-            min(crit_min[c.name] * c.weight / total_crit_weight for c in criteria)
-            if criteria
-            else 0.0
-        )
+        ]
+        juror_agreement = statistics.mean(crit_agreements) if crit_agreements else 1.0
 
-        # juror_agreement: 1 − mean(CoV per criterion), clamped [0, 1]
-        covs: List[float] = []
-        for c in criteria:
-            scores_for_crit = [
-                js.criterion_scores.get(c.name, 0.0) for js in juror_scores
-            ]
-            if len(scores_for_crit) > 1:
-                mean_c = statistics.mean(scores_for_crit)
-                cov = (
-                    (statistics.stdev(scores_for_crit) / mean_c) if mean_c > 0 else 0.0
-                )
-                covs.append(cov)
-            else:
-                covs.append(0.0)
-        juror_agreement = (
-            max(0.0, min(1.0, 1.0 - statistics.mean(covs))) if covs else 1.0
-        )
-
-        # custom
         custom_score: Optional[float] = None
-        if custom_fn_name:
-            if custom_fn_name not in cls._custom_functions:
-                raise ValueError(
-                    f"Custom scoring function '{custom_fn_name}' is not registered. "
-                    f"Call ScoreAggregator.register('{custom_fn_name}', fn) first."
-                )
-            custom_score = cls._custom_functions[custom_fn_name](juror_scores, criteria)
+        if custom_fn is not None:
+            custom_score = custom_fn(juror_scores, criteria)
 
         return ScoredMetrics(
             weighted_mean=weighted_mean,

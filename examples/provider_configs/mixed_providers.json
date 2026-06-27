@@ -1,0 +1,50 @@
+{
+  "name": "Mixed Provider Jury",
+  "description": "Most jurors inherit OpenAI via llm_provider; one juror fully overrides to native Anthropic. Requires: pip install openjury[anthropic]",
+  "score_scale": 5,
+  "llm_provider": {
+    "provider": "openai_compatible",
+    "model_name": "gpt-4o",
+    "api_key": "${OPENAI_API_KEY}"
+  },
+  "jurors": [
+    {
+      "name": "GPT Evaluator",
+      "system_prompt": "Evaluate for factual accuracy and completeness.",
+      "temperature": 0.1,
+      "weight": 1.0
+    },
+    {
+      "name": "GPT User Lens",
+      "system_prompt": "Evaluate from the perspective of a non-technical user.",
+      "temperature": 0.2,
+      "weight": 1.0
+    },
+    {
+      "name": "Claude Evaluator",
+      "model_name": "claude-sonnet-4-20250514",
+      "provider": "anthropic",
+      "api_key": "${ANTHROPIC_API_KEY}",
+      "system_prompt": "You are an independent second opinion. Be rigorous about reasoning quality.",
+      "temperature": 0.1,
+      "weight": 1.5
+    }
+  ],
+  "criteria": [
+    {
+      "name": "helpfulness",
+      "description": "Does the response resolve the user's request?",
+      "weight": 2.0
+    },
+    {
+      "name": "reasoning",
+      "description": "Is the reasoning sound and well-structured?",
+      "weight": 1.5
+    },
+    {
+      "name": "accuracy",
+      "description": "Is the information correct?",
+      "weight": 2.0
+    }
+  ]
+}

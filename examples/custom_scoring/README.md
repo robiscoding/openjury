@@ -2,6 +2,19 @@
 
 OpenJury automatically computes eight canned metrics for every evaluation. This example shows how to register a domain-specific custom scoring function that appears as the `custom` field in `ScoredMetrics`.
 
+## What you'll learn
+
+- Registering a custom `ScoringFunction` via `ScoreAggregator.register()`
+- Wiring `custom_scoring_function` in config JSON
+- Reading `result.scored_metrics.custom` alongside canned metrics
+
+## Prerequisites
+
+| Requirement | Notes |
+|-------------|-------|
+| `OPENAI_API_KEY` or `OPENROUTER_API_KEY` | Per your config |
+| Agent or mock | `python ../tools/mock_agent.py --port 8080` |
+
 ## When to use a custom function
 
 The canned metrics cover most evaluation needs. A custom function is useful when:
@@ -91,3 +104,7 @@ result.scored_metrics.weighted_mean → normal composite (still always present)
 ```
 
 The canned metrics are **always computed** regardless of whether a custom function is registered. Custom is additive, not a replacement.
+
+## Next steps
+
+- [recipes/custom-scoring-gate.md](../../recipes/custom-scoring-gate.md)

@@ -1,6 +1,6 @@
 [project]
 name = "openjury"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Python SDK for evaluating multiple model outputs using configurable LLM-based jurors"
 authors = [{ name = "robiscoding", email = "robiscodingg@gmail.com" }]
 readme = "README.md"
@@ -14,7 +14,6 @@ keywords = [
     "llm-as-a-judge",
     "model-comparison",
     "openai",
-    "langchain",
     "machine-learning",
 ]
 classifiers = [
@@ -27,8 +26,6 @@ classifiers = [
 ]
 
 dependencies = [
-    "langchain>=0.1.0",
-    "langchain-openai>=0.1.0",
     "openai>=1.0.0",
     "pydantic>=2.0.0",
     "typer>=0.16.0",
@@ -43,6 +40,8 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project.optional-dependencies]
+anthropic = ["anthropic>=0.18.0"]
+notebooks = ["jupyter>=1.0.0", "pandas>=2.0.0"]
 dev = [
     "pytest>=7.0.0",
     "pytest-cov>=4.0.0",
@@ -57,6 +56,9 @@ Homepage = "https://github.com/robiscoding/openjury"
 Repository = "https://github.com/robiscoding/openjury"
 Issues = "https://github.com/robiscoding/openjury/issues"
 
+
+[tool.hatch.version]
+path = "src/openjury/__init__.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/openjury"]

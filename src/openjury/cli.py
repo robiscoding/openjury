@@ -1,4 +1,5 @@
 import json
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, List, Optional
 
@@ -21,7 +22,11 @@ from openjury.endpoint_fetcher import (
     load_endpoints_file,
 )
 from openjury.jury_engine import OpenJury
-from openjury.output_format import AgentEvalResult, ResultFormatter
+from openjury.output_format import (
+    AgentEvalResult,
+    ResultFormatter,
+    serialize_eval_result,
+)
 
 cli_app = typer.Typer(
     name="openjury",
@@ -137,7 +142,7 @@ def run(
                         f"[cyan]Evaluating prompt: {current_prompt[:60]}... "
                         f"endpoint: {endpoint.alias or endpoint.url}[/cyan]"
                     )
-                result = jury.score_response(
+                result = jury.evaluate(
                     prompt=current_prompt,
                     endpoint=endpoint,
                     references=references,
@@ -151,11 +156,12 @@ def run(
         if format == "json":
             if len(results) == 1:
                 output = json.dumps(
-                    _result_to_dict(results[0]), indent=2, ensure_ascii=False
+                    serialize_eval_result(results[0]), indent=2, ensure_ascii=False
                 )
             else:
                 output = "\n".join(
-                    json.dumps(_result_to_dict(r), ensure_ascii=False) for r in results
+                    json.dumps(serialize_eval_result(r), ensure_ascii=False)
+                    for r in results
                 )
         else:
             output = "\n\n".join(ResultFormatter.format_result(r) for r in results)
@@ -193,6 +199,9 @@ def batch_eval(
     ),
     limit: Optional[int] = typer.Option(
         None, "--limit", "-n", help="Maximum number of cases to run"
+    ),
+    workers: int = typer.Option(
+        1, "--workers", "-w", help="Number of concurrent case evaluations"
     ),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose logging"),
 ):
@@ -233,38 +242,48 @@ def batch_eval(
     output_path.parent.mkdir(parents=True, exist_ok=True)
     cfg_str = str(config.resolve())
 
-    with output_path.open("w", encoding="utf-8") as out_f:
-        for case in cases:
-            refs, rules = format_exemplars_for_jury(case.exemplars)
-            row_error: Optional[str] = None
-            eval_payload: Optional[dict[str, Any]] = None
-            try:
-                endpoint = resolve_endpoint(case, global_endpoint_specs)
-                result = jury.score_response(
-                    prompt=case.prompt,
-                    endpoint=endpoint,
-                    references=refs,
-                    case_rules=rules,
-                )
-                eval_payload = _result_to_dict(result)
-            except Exception as e:
-                row_error = str(e)
-                if verbose:
-                    console.print_exception()
-
-            record = eval_record(
+    def process_case(case: Any) -> dict[str, Any]:
+        refs, rules = format_exemplars_for_jury(case.exemplars)
+        try:
+            endpoint = resolve_endpoint(case, global_endpoint_specs)
+            result = jury.evaluate(
+                prompt=case.prompt,
+                endpoint=endpoint,
+                references=refs,
+                case_rules=rules,
+            )
+            return eval_record(
                 case_id=case.case_id,
                 config_path=cfg_str,
                 jury_name=jury_config.name,
-                eval_payload=eval_payload,
-                error=row_error,
+                eval_payload=serialize_eval_result(result),
+                error=None,
             )
-            out_f.write(json.dumps(record, ensure_ascii=False) + "\n")
-            out_f.flush()
-
+        except Exception as e:
             if verbose:
-                status = "ok" if row_error is None else f"error: {row_error}"
-                console.print(f"[cyan]{case.case_id}[/cyan] {status}")
+                console.print_exception()
+            return eval_record(
+                case_id=case.case_id,
+                config_path=cfg_str,
+                jury_name=jury_config.name,
+                eval_payload=None,
+                error=str(e),
+            )
+
+    with output_path.open("w", encoding="utf-8") as out_f:
+        with ThreadPoolExecutor(max_workers=max(1, workers)) as executor:
+            futures = [executor.submit(process_case, case) for case in cases]
+            for case, future in zip(cases, futures):
+                record = future.result()
+                out_f.write(json.dumps(record, ensure_ascii=False) + "\n")
+                out_f.flush()
+                if verbose:
+                    status = (
+                        "ok"
+                        if record.get("error") is None
+                        else f"error: {record.get('error')}"
+                    )
+                    console.print(f"[cyan]{case.case_id}[/cyan] {status}")
 
     console.print(f"[green]Wrote {len(cases)} rows to {output_path}[/green]")
 
@@ -288,10 +307,14 @@ def list_jurors(
             table.add_column("Weight", style="yellow")
             table.add_column("Temperature", style="blue")
 
+            global_model = (
+                jury_config.llm_provider.model_name if jury_config.llm_provider else "—"
+            )
             for juror in jury_config.jurors:
+                model = juror.model_name or global_model
                 table.add_row(
                     juror.name,
-                    juror.model_name,
+                    model,
                     str(juror.weight),
                     str(juror.temperature),
                 )
@@ -333,6 +356,11 @@ def list_configs(
         example_config = {
             "name": "Example Jury",
             "score_scale": 5,
+            "llm_provider": {
+                "provider": "openai_compatible",
+                "model_name": "gpt-4o-mini",
+                "api_key": "${OPENAI_API_KEY}",
+            },
             "criteria": [
                 {
                     "name": "factuality",
@@ -353,8 +381,8 @@ def list_configs(
             "jurors": [
                 {
                     "name": "Expert Juror",
-                    "model_name": "openai/gpt-4o-mini",
                     "weight": 2.0,
+                    "temperature": 0.1,
                 }
             ],
         }
@@ -429,31 +457,6 @@ def export_results(
         raise typer.Exit(1)
 
 
-def _result_to_dict(result: AgentEvalResult) -> dict:  # type: ignore[type-arg]
-    """Serialize AgentEvalResult to a JSON-compatible dict."""
-    import dataclasses
-
-    def _default(obj: Any) -> Any:
-        if dataclasses.is_dataclass(obj) and not isinstance(obj, type):
-            return dataclasses.asdict(obj)
-        raise TypeError(f"Object of type {type(obj)} is not JSON serializable")
-
-    raw = result.model_dump(mode="json")
-    # juror_scores are dataclasses (JurorScore), serialize them manually
-    raw["juror_scores"] = [
-        {
-            "juror_name": js.juror_name,
-            "juror_weight": js.juror_weight,
-            "criterion_scores": js.criterion_scores,
-            "criterion_explanations": js.criterion_explanations,
-        }
-        for js in result.juror_scores
-    ]
-    for tr in raw.get("trial_results", []):
-        pass  # trial_results already serialized via model_dump
-    return raw
-
-
 def _load_prompts_file(path: Path) -> List[str]:
     suffix = path.suffix.lower()
     prompts: List[str] = []
@@ -485,11 +488,7 @@ def _load_prompts_file(path: Path) -> List[str]:
     return prompts
 
 
-def main() -> None:
-    cli_app()
-
-
 app = cli_app
 
 if __name__ == "__main__":
-    main()
+    cli_app()

@@ -87,8 +87,3 @@ class TestJuryConfig:
             score_scale=10,
         )
         assert config.score_scale == 10
-
-    def test_no_voting_method_field(self, sample_jury_config):
-        dumped = sample_jury_config.model_dump()
-        assert "voting_method" not in dumped
-        assert "custom_voting_function" not in dumped

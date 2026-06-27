@@ -3,16 +3,19 @@
     "description": "Evaluates the quality of a customer support agent's response",
     "score_scale": 5,
     "num_trials": 1,
+    "llm_provider": {
+        "provider": "openai_compatible",
+        "model_name": "gpt-4o-mini",
+        "api_key": "${OPENAI_API_KEY}"
+    },
     "jurors": [
         {
             "name": "Juror A",
-            "model_name": "openrouter/sonnet-3.5-sonnet",
             "temperature": 0.1,
             "weight": 1.0
         },
         {
             "name": "Juror B",
-            "model_name": "openai/gpt-4o-mini",
             "temperature": 0.1,
             "weight": 1.0
         }

@@ -1,9 +1,38 @@
 from datetime import datetime
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
+from openjury.execution import FetchMetadata, JurorFailure
 from openjury.scoring import ConsistencyResult, JurorScore, ScoredMetrics
+
+
+def juror_score_to_dict(juror_score: JurorScore) -> Dict[str, Any]:
+    return {
+        "juror_name": juror_score.juror_name,
+        "juror_weight": juror_score.juror_weight,
+        "criterion_scores": juror_score.criterion_scores,
+        "criterion_explanations": juror_score.criterion_explanations,
+    }
+
+
+def serialize_eval_result(result: "AgentEvalResult") -> Dict[str, Any]:
+    """Serialize AgentEvalResult to a JSON-compatible dict."""
+    import dataclasses
+
+    raw = result.model_dump(mode="json")
+    raw["juror_scores"] = [juror_score_to_dict(js) for js in result.juror_scores]
+    for i, trial in enumerate(result.trial_results):
+        raw["trial_results"][i]["juror_scores"] = [
+            juror_score_to_dict(js) for js in trial.juror_scores
+        ]
+    if result.fetch_metadata is not None:
+        raw["fetch_metadata"] = dataclasses.asdict(result.fetch_metadata)
+    if result.juror_failures:
+        raw["juror_failures"] = [
+            dataclasses.asdict(failure) for failure in result.juror_failures
+        ]
+    return raw
 
 
 class CriterionEvaluation(BaseModel):
@@ -39,17 +68,17 @@ class AgentEvalResult(BaseModel):
     model_name: Optional[str] = None
     score_scale: int
 
-    # Primary quality (trial 1)
     composite_score: float
     normalized_composite_score: float
     scored_metrics: ScoredMetrics
     criteria_evaluations: Dict[str, CriterionEvaluation] = Field(default_factory=dict)
     juror_scores: List[JurorScore] = Field(default_factory=list)
-    has_custom_score: bool = False
 
-    # Consistency audit (num_trials > 1 only)
     consistency_result: Optional[ConsistencyResult] = None
     trial_results: List[TrialResult] = Field(default_factory=list)
+
+    fetch_metadata: Optional[FetchMetadata] = None
+    juror_failures: List[JurorFailure] = Field(default_factory=list)
 
     timestamp: datetime = Field(default_factory=datetime.now)
 

@@ -4,8 +4,16 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from openjury.config import AgentResponse, CriterionConfig, JurorConfig, JuryConfig
+from openjury.config import (
+    AgentResponse,
+    CriterionConfig,
+    JurorConfig,
+    JurorProvider,
+    JuryConfig,
+    LLMProviderConfig,
+)
 from openjury.endpoint_fetcher import AgentEndpoint
+from openjury.execution import FetchMetadata, FetchResult
 from openjury.output_format import AgentEvalResult
 from openjury.scoring import ConsistencyResult, JurorScore
 
@@ -13,6 +21,11 @@ from openjury.scoring import ConsistencyResult, JurorScore
 def _make_config(num_trials=1, custom_fn=None):
     return JuryConfig(
         name="Agent Test Jury",
+        llm_provider=LLMProviderConfig(
+            provider=JurorProvider.OPENAI_COMPATIBLE,
+            model_name="gpt-4o-mini",
+            api_key="test-api-key",
+        ),
         criteria=[
             CriterionConfig(
                 name="helpfulness",
@@ -31,8 +44,8 @@ def _make_config(num_trials=1, custom_fn=None):
             ),
         ],
         jurors=[
-            JurorConfig(name="Juror A", model_name="gpt-4o-mini", weight=1.0),
-            JurorConfig(name="Juror B", model_name="gpt-4o-mini", weight=1.0),
+            JurorConfig(name="Juror A", weight=1.0),
+            JurorConfig(name="Juror B", weight=1.0),
         ],
         score_scale=5,
         num_trials=num_trials,
@@ -59,14 +72,18 @@ def _make_juror_score(name, helpfulness, accuracy, weight=1.0):
     )
 
 
-@patch("openjury.jury_engine.fetch_all_responses")
+def _fetch_result(response: AgentResponse) -> FetchResult:
+    return FetchResult(response=response, metadata=FetchMetadata())
+
+
+@patch("openjury.jury_engine.fetch_agent_response")
 @patch("openjury.jury_engine.Juror")
 class TestScoreResponse:
     def test_single_trial_returns_agent_eval_result(self, mock_juror_class, mock_fetch):
         from openjury.jury_engine import OpenJury
 
         mock_response = AgentResponse(content="The answer is 42.", id="r1")
-        mock_fetch.return_value = [mock_response]
+        mock_fetch.return_value = _fetch_result(mock_response)
 
         mock_juror_a = MagicMock()
         mock_juror_a.name = "Juror A"
@@ -81,7 +98,7 @@ class TestScoreResponse:
         mock_juror_class.side_effect = [mock_juror_a, mock_juror_b]
 
         jury = OpenJury(_make_config())
-        result = jury.score_response(
+        result = jury.evaluate(
             prompt="What is the answer?",
             endpoint=_make_endpoint(),
         )
@@ -98,7 +115,7 @@ class TestScoreResponse:
         from openjury.jury_engine import OpenJury
 
         mock_response = AgentResponse(content="Response text", id="r1")
-        mock_fetch.return_value = [mock_response]
+        mock_fetch.return_value = _fetch_result(mock_response)
 
         mock_juror_a = MagicMock()
         mock_juror_a.name = "Juror A"
@@ -113,7 +130,7 @@ class TestScoreResponse:
         mock_juror_class.side_effect = [mock_juror_a, mock_juror_b]
 
         jury = OpenJury(_make_config())
-        result = jury.score_response(prompt="Q?", endpoint=_make_endpoint())
+        result = jury.evaluate(prompt="Q?", endpoint=_make_endpoint())
 
         assert "helpfulness" in result.criteria_evaluations
         assert "accuracy" in result.criteria_evaluations
@@ -125,7 +142,7 @@ class TestScoreResponse:
         from openjury.jury_engine import OpenJury
 
         mock_response = AgentResponse(content="Response", id="r1")
-        mock_fetch.return_value = [mock_response]
+        mock_fetch.return_value = _fetch_result(mock_response)
 
         def make_mock_juror(name):
             m = MagicMock()
@@ -140,7 +157,7 @@ class TestScoreResponse:
         ]
 
         jury = OpenJury(_make_config(num_trials=3))
-        result = jury.score_response(prompt="Q?", endpoint=_make_endpoint())
+        result = jury.evaluate(prompt="Q?", endpoint=_make_endpoint())
 
         assert result.consistency_result is not None
         assert isinstance(result.consistency_result, ConsistencyResult)
@@ -153,7 +170,7 @@ class TestScoreResponse:
         from openjury.jury_engine import OpenJury
 
         mock_response = AgentResponse(content="Response", id="r1")
-        mock_fetch.return_value = [mock_response]
+        mock_fetch.return_value = _fetch_result(mock_response)
 
         def make_mock_juror(name):
             m = MagicMock()
@@ -168,7 +185,7 @@ class TestScoreResponse:
         ]
 
         jury = OpenJury(_make_config(num_trials=1))
-        result = jury.score_response(prompt="Q?", endpoint=_make_endpoint())
+        result = jury.evaluate(prompt="Q?", endpoint=_make_endpoint())
 
         assert result.consistency_result is None
 
@@ -176,7 +193,7 @@ class TestScoreResponse:
         from openjury.jury_engine import OpenJury
 
         mock_response = AgentResponse(content="Resp", id="r1")
-        mock_fetch.return_value = [mock_response]
+        mock_fetch.return_value = _fetch_result(mock_response)
 
         def make_mock_juror(name):
             m = MagicMock()
@@ -191,7 +208,7 @@ class TestScoreResponse:
         ]
 
         jury = OpenJury(_make_config())
-        result = jury.score_response(prompt="Q?", endpoint=_make_endpoint())
+        result = jury.evaluate(prompt="Q?", endpoint=_make_endpoint())
 
         assert (
             result.normalized_composite_score
@@ -199,11 +216,11 @@ class TestScoreResponse:
         )
         assert 0.0 <= result.normalized_composite_score <= 1.0
 
-    def test_has_custom_score_false_by_default(self, mock_juror_class, mock_fetch):
+    def test_no_custom_score_by_default(self, mock_juror_class, mock_fetch):
         from openjury.jury_engine import OpenJury
 
         mock_response = AgentResponse(content="Response", id="r1")
-        mock_fetch.return_value = [mock_response]
+        mock_fetch.return_value = _fetch_result(mock_response)
 
         def make_mock_juror(name):
             m = MagicMock()
@@ -218,5 +235,5 @@ class TestScoreResponse:
         ]
 
         jury = OpenJury(_make_config())
-        result = jury.score_response(prompt="Q?", endpoint=_make_endpoint())
-        assert result.has_custom_score is False
+        result = jury.evaluate(prompt="Q?", endpoint=_make_endpoint())
+        assert result.scored_metrics.custom is None

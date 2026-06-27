@@ -25,20 +25,6 @@ OpenJury makes this practical: configure jurors declaratively in JSON, wire rubr
 
 ---
 
-## Key Features
-
-- **Agent Evaluation:** Score a single agent response per prompt
-- **Structured Rubrics:** Explicit score anchors per criterion dramatically improve inter-juror reliability
-- **Eight Canned Metrics:** `weighted_mean`, `mean`, `median`, `min/max`, `harmonic_mean`, `weakest_link`, `juror_agreement`
-- **Custom Scoring:** Register a custom scorer (python function) for domain-specific composite logic
-- **Consistency Audit:** Run `num_trials > 1` to measure how reliably your agent responds to the same prompt
-- **Endpoint Fetching:** OpenJury integrates seamlessly as it calls your agent via your http generate endpoint
-- **Batch Evaluation:** Run a JSONL or CSV dataset of prompts through the same jury
-- **Parallel Processing:** Jurors run concurrently; batch cases are independent
-- **CLI:** `openjury run` and `openjury batch-eval` for script-free operation
-
----
-
 ## Installation
 
 **Requirements:** Python 3.11 or newer
@@ -47,54 +33,74 @@ OpenJury makes this practical: configure jurors declaratively in JSON, wire rubr
 pip install openjury
 ```
 
-### From Source (for development/contribution)
+### From source
 
 ```bash
 git clone https://github.com/robiscoding/openjury.git
 cd openjury
 pip install -e .
-uv pip install -e ".[dev]"     # (optional) dev dependencies
+uv pip install -e ".[dev]"     # optional dev dependencies
 ```
+
+---
+
+## Choose your path
+
+| Track | Goal | Time | API keys? |
+|-------|------|------|-----------|
+| **Try it** | See output shape, understand `AgentEvalResult` | 2 min | No |
+| **Evaluate my agent** | Full fetch + score pipeline | 10 min | Yes |
+| **Production integrate** | Batch, resume, custom scoring, CI | 30+ min | Yes |
+
+### Try it (no agent, no keys)
+
+```bash
+pip install openjury
+python examples/hello_world/score_existing.py
+```
+
+→ [examples/hello_world/](examples/hello_world/) · offline demo with sample output
+
+### Evaluate my agent
+
+```bash
+# Terminal 1 — mock agent (or use your own endpoint)
+python examples/tools/mock_agent.py --port 8080
+
+# Terminal 2
+export OPENAI_API_KEY="..." AGENT_API_KEY=demo
+python examples/basic_usage/basic_jury_run.py
+```
+
+→ [examples/basic_usage/](examples/basic_usage/) · [docs/endpoint-config.md](docs/endpoint-config.md)
+
+### Go deeper
+
+- [docs/](docs/README.md) — architecture, config schema, composable API, CLI
+- [recipes/](recipes/README.md) — task-oriented how-tos
+- [notebooks/](notebooks/README.md) — interactive Jupyter walkthroughs
+- [examples/](examples/README.md) — full examples index
 
 ---
 
 ## Quick Start
 
-### 1. Set environment variables
+### 1. Create a jury config
 
-Juror models run via [OpenRouter](https://openrouter.ai) by default:
-
-```bash
-export OPENROUTER_API_KEY="sk-or-..."
-```
-
-Or use OpenAI directly:
-
-```bash
-export LLM_PROVIDER=openai
-export OPENAI_API_KEY="sk-..."
-```
-
-### 2. Create a jury config
+Set a jury-level `llm_provider` for shared credentials. Jurors inherit it by default. Use `${ENV_VAR}` for secrets.
 
 ```json
 {
   "name": "Customer Support Jury",
   "score_scale": 5,
+  "llm_provider": {
+    "provider": "openai_compatible",
+    "model_name": "gpt-4o-mini",
+    "api_key": "${OPENAI_API_KEY}"
+  },
   "jurors": [
-    {
-      "name": "Support Expert",
-      "model_name": "qwen/qwen3-4b:free",
-      "system_prompt": "You are a senior customer support manager.",
-      "weight": 2.0,
-      "temperature": 0.1
-    },
-    {
-      "name": "Customer Perspective",
-      "model_name": "mistralai/devstral-small-2505:free",
-      "weight": 1.0,
-      "temperature": 0.3
-    }
+    { "name": "Support Expert", "system_prompt": "You are a senior support manager.", "weight": 2.0 },
+    { "name": "Customer Perspective", "weight": 1.0 }
   ],
   "criteria": [
     {
@@ -103,7 +109,7 @@ export OPENAI_API_KEY="sk-..."
       "weight": 2.0,
       "rubric": {
         "1": "Ignores or misunderstands the question",
-        "3": "Partially addresses the question but misses key information",
+        "3": "Partially addresses the question",
         "5": "Directly and completely resolves the issue"
       }
     },
@@ -121,37 +127,9 @@ export OPENAI_API_KEY="sk-..."
 }
 ```
 
-**Key fields:**
+Full field reference: [docs/config-schema.md](docs/config-schema.md)
 
-| Field | Default | Description |
-|-------|---------|-------------|
-| `score_scale` | `5` | Global score scale — all criteria scored 1–N |
-| `num_trials` | `1` | `1` = quality eval; `> 1` = consistency audit |
-| `criteria[].rubric` | `null` | Score anchors per level — strongly recommended |
-| `jurors[].weight` | `1.0` | Relative influence in `weighted_mean` |
-
-### 3. Define your agent endpoint
-
-```json
-[
-  {
-    "url": "http://localhost:8080/v1/chat/completions",
-    "alias": "my-agent",
-    "headers": { "Authorization": "Bearer ${AGENT_API_KEY}" },
-    "request_body_template": {
-      "model": "my-model",
-      "messages": [{ "role": "user", "content": "{prompt}" }]
-    },
-    "response_path": "choices.0.message.content"
-  }
-]
-```
-
-Use `${ENV_VAR}` for credentials (never hardcode keys). `{prompt}` is replaced with the prompt text at runtime.
-
-### 4. Run an evaluation
-
-**Python:**
+### 2. Run an evaluation
 
 ```python
 from openjury import JuryConfig, OpenJury, ResultFormatter
@@ -169,192 +147,46 @@ endpoint = AgentEndpoint(
     },
 )
 
-result = jury.score_response(
-    prompt="How do I reset my password?",
-    endpoint=endpoint,
-)
-
+result = jury.evaluate(prompt="How do I reset my password?", endpoint=endpoint)
 print(ResultFormatter.format_result(result))
 print(f"Score: {result.composite_score:.2f} / {result.score_scale}")
 ```
 
+`score_response()` is a backward-compatible alias for `evaluate()`.
+
 **CLI:**
 
 ```bash
-export AGENT_API_KEY="..."
 openjury run \
   --config jury_config.json \
   --endpoints-config endpoints.json \
   --prompt "How do I reset my password?"
 ```
 
-### 5. Read the output
+### 3. Read the output
 
 ```
 ╔══ Quality Evaluation  (scale: 1–5) ══
-  Jury:              Customer Support Jury
-  Endpoint:          my-agent
-
   composite_score:   3.87 / 5  (0.774 normalized)
-
-  Scoring Metrics:
-    weighted_mean                3.870   ← primary composite; use this
-    mean                         3.650
-    median                       3.900
-    min_score                    3.200   ← strictest juror's view
-    max_score                    4.300   ← most lenient juror's view
-    harmonic_mean                3.710   ← penalises low criterion scores
-    weakest_link                 0.640   ← worst criterion × its weight
-    juror_agreement (0–1)        0.880   ← 1 = unanimous
-
-  Criteria Breakdown:
-    helpfulness (weight 2.0):  4.10  [agreement: 0.91  min: 3.5  max: 4.8]
-    accuracy (weight 2.0):     3.60  [agreement: 0.84  min: 3.0  max: 4.2]
-╚══
+  juror_agreement (0–1)        0.880   ← 1 = unanimous
+  ...
 ```
 
-- **`composite_score`** is the `weighted_mean` from trial 1 — this is the headline quality number
-- **`juror_agreement`** near 1.0 means high confidence in the score; near 0 means contested
-- **`weakest_link`** flags a standout failure even when the composite looks okay
+- **`composite_score`** — headline quality number (`weighted_mean` from trial 1)
+- **`juror_agreement`** — near 1.0 = high confidence; near 0 = contested
+- **`weakest_link`** — flags a standout failure even when composite looks okay
 
 ---
 
-## Batch Evaluation
+## Key Features
 
-Run a JSONL or CSV dataset of prompts through the same jury:
-
-```bash
-openjury batch-eval \
-  --config jury_config.json \
-  --input dataset.jsonl \
-  --output results.jsonl
-```
-
-Each case in `dataset.jsonl`:
-
-```json
-{
-  "case_id": "case-1",
-  "prompt": "How do I cancel my subscription?",
-  "endpoints": [
-    {
-      "url": "http://localhost:8080/v1/chat/completions",
-      "alias": "my-agent",
-      "request_body_template": {
-        "model": "my-model",
-        "messages": [{"role": "user", "content": "{prompt}"}]
-      },
-      "response_path": "choices.0.message.content"
-    }
-  ]
-}
-```
-
-Or supply a global endpoint fallback for all cases:
-
-```bash
-openjury batch-eval \
-  --config jury_config.json \
-  --input dataset.jsonl \
-  --endpoints-config endpoints.json \
-  --output results.jsonl
-```
-
----
-
-## Consistency Audit
-
-Set `num_trials > 1` to measure how reliably your agent produces similar-quality responses to the same prompt. OpenJury calls the endpoint N times, evaluates each independently, and reports the standard deviation across trials.
-
-```json
-{ "num_trials": 3, "score_scale": 5 }
-```
-
-```
-  ── Consistency Audit ──
-  trials:      3
-  score_std:   0.08  (mean: 3.91  min: 3.82  max: 3.99)
-  trial scores: [3.99, 3.82, 3.91]
-  low variance (std=0.08) — agent responds consistently
-```
-
-| `score_std` | Meaning |
-|-------------|---------|
-| < 0.1 | Low — agent is very consistent |
-| 0.1–0.3 | Moderate — consider reviewing temperature |
-| ≥ 0.3 | High — agent is unpredictable |
-
-The `composite_score` always comes from trial 1. Trials 2–N only populate `consistency_result` — they are not averaged into quality, since users each experience one response, not a mean.
-
----
-
-## Custom Scoring
-
-Register a Python function for domain-specific composite logic. It receives all juror scores and criteria, and must return a `float` on the `score_scale` axis:
-
-```python
-from openjury import ScoreAggregator
-
-def safety_gated(juror_scores, criteria):
-    """Zero out composite if any juror rates safety below 2."""
-    for js in juror_scores:
-        if js.criterion_scores.get("safety", 5.0) < 2.0:
-            return 0.0
-    # fall back to weighted mean
-    total_crit_w = sum(c.weight for c in criteria) or 1.0
-    total_juror_w = sum(js.juror_weight for js in juror_scores) or 1.0
-    return sum(
-        sum(js.criterion_scores.get(c.name, 0.0) * js.juror_weight for js in juror_scores)
-        / total_juror_w * c.weight
-        for c in criteria
-    ) / total_crit_w
-
-ScoreAggregator.register("safety_gated", safety_gated)
-```
-
-Reference it in `jury_config.json`:
-
-```json
-{ "custom_scoring_function": "safety_gated" }
-```
-
-The result appears as `result.scored_metrics.custom`. Canned metrics are always computed regardless.
-
----
-
-## Endpoint Configuration Reference
-
-| Field | Default | Description |
-|-------|---------|-------------|
-| `url` | required | Any URL — `http://localhost:…`, `https://…` |
-| `alias` | `url` | Display name in results |
-| `headers` | `{}` | HTTP headers; use `${ENV_VAR}` for credentials |
-| `request_body_template` | OpenAI chat shape | Any JSON; `{prompt}` is substituted at runtime |
-| `stream` | `false` | `true` = SSE streaming, accumulated before evaluation |
-| `response_path` | `choices.0.message.content` | Dot-notation path into the response JSON |
-| `timeout_s` | `60.0` | Per-request timeout in seconds |
-
-**Custom request body (non-OpenAI agent):**
-```json
-{
-  "url": "http://localhost:8080/generate",
-  "alias": "local-agent",
-  "request_body_template": { "prompt": "{prompt}" },
-  "response_path": "text"
-}
-```
-
-**SSE streaming:**
-```json
-{
-  "url": "https://your-api.example.com/v1/chat/completions",
-  "alias": "streaming-model",
-  "headers": { "Authorization": "Bearer ${MY_API_KEY}" },
-  "stream": true
-}
-```
-
-When `stream: true` and `response_path` is not set, OpenJury automatically uses the SSE per-chunk path (`choices.0.delta.content`).
+- **Agent Evaluation** — score a single agent response per prompt
+- **Structured Rubrics** — score anchors per criterion improve inter-juror reliability
+- **Eight Canned Metrics** — weighted mean, median, harmonic mean, weakest link, juror agreement, and more
+- **Custom Scoring** — register a Python function for domain-specific composite logic
+- **Consistency Audit** — `num_trials > 1` measures response reliability
+- **Batch Evaluation** — JSONL/CSV datasets via CLI or `evaluate_items()`
+- **Parallel Processing** — concurrent jurors and batch items
 
 ---
 
@@ -362,30 +194,67 @@ When `stream: true` and `response_path` is not set, OpenJury automatically uses 
 
 | Example | What it shows |
 |---------|--------------|
-| [`examples/basic_usage/`](examples/basic_usage/) | Single prompt, `score_response()`, reading `AgentEvalResult` |
-| [`examples/batch_eval/`](examples/batch_eval/) | JSONL/CSV dataset, `batch-eval` CLI, output analysis |
+| [`examples/hello_world/`](examples/hello_world/) | Offline demo — no agent, no API keys |
+| [`examples/basic_usage/`](examples/basic_usage/) | Single prompt, full pipeline, reading `AgentEvalResult` |
+| [`examples/provider_configs/`](examples/provider_configs/) | OpenAI, OpenRouter, Ollama, mixed providers |
+| [`examples/batch_eval/`](examples/batch_eval/) | JSONL/CSV dataset, `batch-eval` CLI |
 | [`examples/custom_scoring/`](examples/custom_scoring/) | `ScoreAggregator.register()`, safety-gate pattern |
-| [`examples/consistency_audit/`](examples/consistency_audit/) | `num_trials > 1`, reading `ConsistencyResult.score_std` |
-| [`examples/web_server/`](examples/web_server/) | Flask API wrapping `score_response()` |
+| [`examples/consistency_audit/`](examples/consistency_audit/) | `num_trials > 1`, `ConsistencyResult.score_std` |
+| [`examples/resume_evaluation/`](examples/resume_evaluation/) | Fetch/score split, crash recovery |
+| [`examples/web_server/`](examples/web_server/) | Flask API wrapping evaluation |
+| [`examples/tools/`](examples/tools/) | Mock agent for local development |
+
+Full index: [examples/README.md](examples/README.md)
+
+---
+
+## Troubleshooting
+
+| Symptom | Fix |
+|---------|-----|
+| `ConfigurationError` for `${VAR}` | Export env vars before `OpenJury(...)`. See [provider-config.md](docs/provider-config.md) |
+| Partial juror override `ValidationError` | Set all three: `model_name`, `api_key`, `provider`. See [config-schema.md](docs/config-schema.md) |
+| `JurorException: missing criterion` | Juror JSON keys must match `criteria[].name` exactly |
+| `EndpointFetchError` | Check URL, headers, `response_path`. See [endpoint-config.md](docs/endpoint-config.md) |
+| Low `juror_agreement` | Add rubrics, lower juror temperature. See [recipes/design-rubrics.md](recipes/design-rubrics.md) |
+
+---
+
+## Documentation
+
+| Resource | Description |
+|----------|-------------|
+| [docs/](docs/README.md) | Architecture, config schema, API, CLI |
+| [recipes/](recipes/README.md) | Task-oriented cookbook |
+| [notebooks/](notebooks/README.md) | Interactive tutorials |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | Development setup |
+
+Advanced topics (moved from this README for brevity):
+
+- [Composable API](docs/composable-api.md) — fetch/score split, batch, serialization
+- [Batch evaluation](recipes/batch-eval-pipeline.md) — JSONL datasets
+- [Consistency audit](recipes/consistency-audit-before-ship.md) — `num_trials`
+- [Custom scoring](recipes/custom-scoring-gate.md) — safety gates
+- [Provider setup](docs/provider-config.md) — OpenAI, OpenRouter, Anthropic, Ollama
 
 ---
 
 ## Use Cases
 
-- **Customer support agents** — score helpfulness, accuracy, and tone per response; monitor quality over time
-- **Code review assistants** — evaluate correctness, readability, and security criteria with rubric anchors
+- **Customer support agents** — score helpfulness, accuracy, and tone per response
+- **Code review assistants** — evaluate correctness, readability, and security
 - **Content generation** — assess clarity, tone, and factuality before publishing
-- **Production monitoring** — track `composite_score` drift between model versions or prompt changes
-- **Consistency testing** — before shipping a prompt, run `num_trials=3` to verify stable output quality
+- **Production monitoring** — track `composite_score` drift between model versions
+- **Consistency testing** — run `num_trials=3` before shipping a prompt change
 
 ---
 
 ## License
 
-OpenJury is licensed under the Apache License 2.0. See the [LICENSE](LICENSE) file for details.
+Apache License 2.0. See [LICENSE](LICENSE).
 
 ---
 
 ## Contributing
 
-Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for details.
+Contributions welcome! See [CONTRIBUTING.md](CONTRIBUTING.md).
