@@ -1,4 +1,4 @@
-from unittest.mock import Mock, patch
+from unittest.mock import MagicMock, Mock, patch
 
 import pytest
 
@@ -6,30 +6,43 @@ from openjury import AgentResponse, Juror
 from openjury.scoring import JurorScore
 
 
-@patch("openjury.juror.ChatOpenAI")
+def _mock_openai_response(content: str) -> MagicMock:
+    """Build a mock openai ChatCompletion response with the given message content."""
+    mock_choice = MagicMock()
+    mock_choice.message.content = content
+    mock_resp = MagicMock()
+    mock_resp.choices = [mock_choice]
+    return mock_resp
+
+
+@patch("openjury.juror.OpenAI")
 class TestJurorIntegration:
-    def test_juror_initialization(self, mock_llm_class, sample_jurors):
-        mock_llm_class.return_value = Mock()
-        juror = Juror(sample_jurors[0])
+    def test_juror_initialization(
+        self, mock_openai_class, sample_jurors, sample_llm_provider
+    ):
+        mock_openai_class.return_value = MagicMock()
+        juror = Juror(sample_jurors[0], jury_llm_provider=sample_llm_provider)
         assert juror.name == "Expert Juror"
-        assert juror.config.model_name == "gpt-3.5-turbo"
-        mock_llm_class.assert_called_once()
+        assert juror.llm_config.model_name == "gpt-3.5-turbo"
+        mock_openai_class.assert_called_once()
 
     def test_juror_evaluate_returns_juror_score(
         self,
-        mock_llm_class,
+        mock_openai_class,
         sample_jurors,
+        sample_llm_provider,
         sample_criteria,
         sample_response,
         sample_prompt,
     ):
-        mock_llm = Mock()
-        mock_llm.invoke.return_value = Mock(
-            content='{"scores": {"factuality": {"score": 4, "explanation": "Good facts"}, "clarity": {"score": 5, "explanation": "Very clear"}}}'
+        mock_client = MagicMock()
+        mock_client.chat.completions.create.return_value = _mock_openai_response(
+            '{"scores": {"factuality": {"score": 4, "explanation": "Good facts"}, '
+            '"clarity": {"score": 5, "explanation": "Very clear"}}}'
         )
-        mock_llm_class.return_value = mock_llm
+        mock_openai_class.return_value = mock_client
 
-        juror = Juror(sample_jurors[0])
+        juror = Juror(sample_jurors[0], jury_llm_provider=sample_llm_provider)
         result = juror.evaluate(
             prompt=sample_prompt,
             response=sample_response,
@@ -43,7 +56,7 @@ class TestJurorIntegration:
         assert result.criterion_explanations["factuality"] == "Good facts"
 
     def test_juror_evaluate_with_rubric_criteria(
-        self, mock_llm_class, sample_jurors, sample_prompt
+        self, mock_openai_class, sample_jurors, sample_llm_provider, sample_prompt
     ):
         from openjury.config import CriterionConfig
 
@@ -59,13 +72,13 @@ class TestJurorIntegration:
                 },
             )
         ]
-        mock_llm = Mock()
-        mock_llm.invoke.return_value = Mock(
-            content='{"scores": {"helpfulness": {"score": 5, "explanation": "Very helpful"}}}'
+        mock_client = MagicMock()
+        mock_client.chat.completions.create.return_value = _mock_openai_response(
+            '{"scores": {"helpfulness": {"score": 5, "explanation": "Very helpful"}}}'
         )
-        mock_llm_class.return_value = mock_llm
+        mock_openai_class.return_value = mock_client
 
-        juror = Juror(sample_jurors[0])
+        juror = Juror(sample_jurors[0], jury_llm_provider=sample_llm_provider)
         result = juror.evaluate(
             prompt=sample_prompt,
             response=AgentResponse(content="Helpful response", id="r1"),
@@ -75,39 +88,52 @@ class TestJurorIntegration:
         assert isinstance(result, JurorScore)
         assert result.criterion_scores["helpfulness"] == 5.0
 
-    def test_juror_evaluate_fallback_parse(
-        self, mock_llm_class, sample_jurors, sample_criteria, sample_prompt
+    def test_juror_evaluate_fallback_parse_raises(
+        self,
+        mock_openai_class,
+        sample_jurors,
+        sample_llm_provider,
+        sample_criteria,
+        sample_prompt,
     ):
-        mock_llm = Mock()
-        # Non-JSON response — fallback parser should fill scores
-        mock_llm.invoke.return_value = Mock(content="factuality: 3\nclarity: 4\n")
-        mock_llm_class.return_value = mock_llm
+        from openjury.errors import JurorErrorCode
+        from openjury.juror import JurorException
 
-        juror = Juror(sample_jurors[0])
-        result = juror.evaluate(
-            prompt=sample_prompt,
-            response=AgentResponse(content="Some response", id="r1"),
-            criteria=sample_criteria,
+        mock_client = MagicMock()
+        # Non-JSON response — should raise rather than silently assign garbage scores
+        mock_client.chat.completions.create.return_value = _mock_openai_response(
+            "factuality: 3\nclarity: 4\n"
         )
+        mock_openai_class.return_value = mock_client
 
-        assert isinstance(result, JurorScore)
-        # Fallback should produce scores for all criteria
-        assert "factuality" in result.criterion_scores
-        assert "clarity" in result.criterion_scores
+        juror = Juror(sample_jurors[0], jury_llm_provider=sample_llm_provider)
+        with pytest.raises(JurorException) as exc_info:
+            juror.evaluate(
+                prompt=sample_prompt,
+                response=AgentResponse(content="Some response", id="r1"),
+                criteria=sample_criteria,
+                max_retries=1,
+            )
+        assert exc_info.value.code == JurorErrorCode.JUROR_PARSE_ERROR
 
     def test_juror_evaluate_missing_criteria_raises(
-        self, mock_llm_class, sample_jurors, sample_criteria, sample_prompt
+        self,
+        mock_openai_class,
+        sample_jurors,
+        sample_llm_provider,
+        sample_criteria,
+        sample_prompt,
     ):
         from openjury.juror import JurorException
 
-        mock_llm = Mock()
+        mock_client = MagicMock()
         # Only returns one criterion, missing the other
-        mock_llm.invoke.return_value = Mock(
-            content='{"scores": {"factuality": {"score": 4, "explanation": "ok"}}}'
+        mock_client.chat.completions.create.return_value = _mock_openai_response(
+            '{"scores": {"factuality": {"score": 4, "explanation": "ok"}}}'
         )
-        mock_llm_class.return_value = mock_llm
+        mock_openai_class.return_value = mock_client
 
-        juror = Juror(sample_jurors[0])
+        juror = Juror(sample_jurors[0], jury_llm_provider=sample_llm_provider)
         with pytest.raises(JurorException):
             juror.evaluate(
                 prompt=sample_prompt,

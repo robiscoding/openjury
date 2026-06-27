@@ -1,9 +1,26 @@
+import dataclasses
+import warnings
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Dict, List, Optional
+from typing import Callable, Dict, List, Optional, Sequence
 
 from openjury.config import AgentResponse, JuryConfig
-from openjury.endpoint_fetcher import AgentEndpoint, fetch_all_responses
-from openjury.juror import Juror, JurorException
+from openjury.endpoint_fetcher import AgentEndpoint, fetch_agent_response
+from openjury.errors import (
+    EvaluationErrorCode,
+    JurorErrorCode,
+    OpenJuryEvaluationError,
+    OpenJuryInitializationError,
+)
+from openjury.execution import (
+    EvaluationItem,
+    ExecutionOptions,
+    ItemEvalResult,
+    JurorFailure,
+    ProgressEvent,
+    ProgressEventType,
+    ScoringResult,
+)
+from openjury.juror import Juror
 from openjury.logger import logger
 from openjury.output_format import (
     AgentEvalResult,
@@ -11,30 +28,54 @@ from openjury.output_format import (
     ResultFormatter,
     TrialResult,
 )
-from openjury.scoring import JurorScore, ScoreAggregator
+from openjury.scoring import (
+    JurorScore,
+    ScoreAggregator,
+    ScoringFunction,
+    _criterion_agreement,
+)
 
-
-class OpenJuryInitializationError(Exception):
-    pass
-
-
-class OpenJuryEvaluationError(Exception):
-    pass
+__all__ = ["OpenJury", "OpenJuryEvaluationError", "OpenJuryInitializationError"]
 
 
 class OpenJury:
     def __init__(
         self,
         config: JuryConfig,
+        custom_scoring_functions: Optional[Dict[str, ScoringFunction]] = None,
         parallel_execution: bool = True,
     ):
+        if not parallel_execution:
+            warnings.warn(
+                "OpenJury(parallel_execution=False) is deprecated. "
+                "Use ExecutionOptions(max_juror_workers=1) instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
         self.config = config
         self.parallel_execution = parallel_execution
         self.jurors: List[Juror] = []
 
+        self._custom_fn: Optional[ScoringFunction] = None
+        if config.custom_scoring_function:
+            fn_name = config.custom_scoring_function
+            fn_map = custom_scoring_functions or {}
+            if fn_name in fn_map:
+                self._custom_fn = fn_map[fn_name]
+            elif fn_name in ScoreAggregator._custom_functions:
+                self._custom_fn = ScoreAggregator._custom_functions[fn_name]
+            else:
+                raise OpenJuryInitializationError(
+                    f"Custom scoring function '{fn_name}' is not registered. "
+                    f"Pass custom_scoring_functions={{'{fn_name}': fn}} to OpenJury()."
+                )
+
         for cfg in config.jurors:
             try:
-                juror = Juror(cfg)
+                juror = Juror(
+                    cfg,
+                    jury_llm_provider=config.llm_provider,
+                )
                 self.jurors.append(juror)
                 logger.info(f"Initialized juror: {juror.name}")
             except Exception as e:
@@ -55,6 +96,15 @@ class OpenJury:
             f"criteria={len(self.config.criteria)})"
         )
 
+    @staticmethod
+    def _resolve_options(options: ExecutionOptions | None) -> ExecutionOptions:
+        return options if options is not None else ExecutionOptions()
+
+    def _resolve_juror_workers(self, options: ExecutionOptions, count: int) -> int:
+        if not self.parallel_execution or count <= 1:
+            return 1
+        return min(count, options.max_juror_workers)
+
     def _score_with_juror(
         self,
         juror: Juror,
@@ -62,69 +112,96 @@ class OpenJury:
         response: AgentResponse,
         references: Optional[str],
         case_rules: Optional[str],
+        options: ExecutionOptions,
     ) -> JurorScore:
-        return juror.evaluate(
-            prompt=prompt,
-            response=response,
-            criteria=self.config.criteria,
-            score_scale=self.config.score_scale,
-            max_retries=self.config.max_retries,
-            evaluation_template=self.config.evaluation_template,
-            references=references,
-            case_rules=case_rules,
-        )
+        with (options or ExecutionOptions()).outbound_slot():
+            return juror.evaluate(
+                prompt=prompt,
+                response=response,
+                criteria=self.config.criteria,
+                score_scale=self.config.score_scale,
+                max_retries=self.config.max_retries,
+                evaluation_template=self.config.evaluation_template,
+                references=references,
+                case_rules=case_rules,
+            )
 
-    def _run_jurors(
+    def _juror_failure_from_exception(
+        self, juror: Juror, exc: Exception
+    ) -> JurorFailure:
+        code = getattr(exc, "code", JurorErrorCode.JUROR_ERROR)
+        return JurorFailure(juror_name=juror.name, code=str(code), message=str(exc))
+
+    def run_jurors(
         self,
         prompt: str,
         response: AgentResponse,
-        references: Optional[str],
-        case_rules: Optional[str],
-    ) -> List[JurorScore]:
-        """Run all jurors against a single response; skip failures in parallel mode."""
-        juror_scores: List[JurorScore] = []
+        *,
+        references: Optional[str] = None,
+        case_rules: Optional[str] = None,
+        jurors_to_run: Sequence[str] | None = None,
+        options: ExecutionOptions | None = None,
+    ) -> ScoringResult:
+        """Run jurors against a response; collect partial successes and failures."""
+        opts = self._resolve_options(options)
+        active_jurors = self.jurors
+        if jurors_to_run is not None:
+            names = set(jurors_to_run)
+            active_jurors = [j for j in self.jurors if j.name in names]
+            if not active_jurors:
+                raise OpenJuryEvaluationError(
+                    f"No matching jurors for names: {sorted(names)}"
+                )
 
-        if self.parallel_execution and len(self.jurors) > 1:
-            with ThreadPoolExecutor(max_workers=min(len(self.jurors), 10)) as executor:
-                future_map = {
-                    executor.submit(
-                        self._score_with_juror,
-                        juror,
-                        prompt,
-                        response,
-                        references,
-                        case_rules,
-                    ): juror
-                    for juror in self.jurors
-                }
-                for future in as_completed(future_map):
-                    juror = future_map[future]
-                    try:
-                        juror_scores.append(future.result())
-                        logger.info(f"Juror {juror.name} completed scoring")
-                    except Exception as e:
-                        logger.error(f"Juror {juror.name} failed: {e}")
-        else:
-            for juror in self.jurors:
-                try:
-                    juror_scores.append(
-                        self._score_with_juror(
-                            juror, prompt, response, references, case_rules
+        juror_scores: List[JurorScore] = []
+        juror_failures: List[JurorFailure] = []
+
+        def run_one(juror: Juror) -> None:
+            opts.check_cancelled()
+            if opts.on_progress is not None:
+                opts.on_progress(
+                    ProgressEvent(
+                        type=ProgressEventType.JUROR_STARTED,
+                        juror_name=juror.name,
+                    )
+                )
+            try:
+                score = self._score_with_juror(
+                    juror, prompt, response, references, case_rules, opts
+                )
+                juror_scores.append(score)
+                logger.info(f"Juror {juror.name} completed scoring")
+                if opts.on_progress is not None:
+                    opts.on_progress(
+                        ProgressEvent(
+                            type=ProgressEventType.JUROR_COMPLETED,
+                            juror_name=juror.name,
                         )
                     )
-                    logger.info(f"Juror {juror.name} completed scoring")
-                except Exception as e:
-                    logger.error(f"Juror {juror.name} failed: {e}")
+            except Exception as exc:
+                logger.error(f"Juror {juror.name} failed: {exc}")
+                juror_failures.append(self._juror_failure_from_exception(juror, exc))
 
-        if not juror_scores:
-            raise OpenJuryEvaluationError("All jurors failed to score the response")
+        max_workers = self._resolve_juror_workers(opts, len(active_jurors))
+        if max_workers > 1:
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                futures = [executor.submit(run_one, juror) for juror in active_jurors]
+                for future in futures:
+                    future.result()
+        else:
+            for juror in active_jurors:
+                run_one(juror)
 
-        if len(juror_scores) < len(self.jurors):
+        if juror_scores and juror_failures:
             logger.warning(
-                f"Only {len(juror_scores)}/{len(self.jurors)} jurors completed successfully"
+                f"Only {len(juror_scores)}/{len(active_jurors)} jurors completed successfully"
             )
 
-        return juror_scores
+        return ScoringResult(
+            juror_scores=juror_scores,
+            juror_failures=juror_failures,
+            all_jurors_succeeded=len(juror_failures) == 0,
+        )
 
     def _build_trial_result(
         self,
@@ -135,9 +212,10 @@ class OpenJury:
         scored_metrics = ScoreAggregator.compute_all(
             juror_scores=juror_scores,
             criteria=self.config.criteria,
-            custom_fn_name=self.config.custom_scoring_function,
+            custom_fn=self._custom_fn,
         )
 
+        total_jw = sum(js.juror_weight for js in juror_scores)
         criteria_evaluations: Dict[str, CriterionEvaluation] = {}
         for c in self.config.criteria:
             crit_scores = [js.criterion_scores.get(c.name, 0.0) for js in juror_scores]
@@ -145,8 +223,6 @@ class OpenJury:
                 js.juror_name: js.criterion_explanations.get(c.name, "")
                 for js in juror_scores
             }
-
-            total_jw = sum(js.juror_weight for js in juror_scores)
             weighted_mean = (
                 sum(
                     js.criterion_scores.get(c.name, 0.0) * js.juror_weight
@@ -156,20 +232,11 @@ class OpenJury:
                 if total_jw
                 else 0.0
             )
-
-            mean_c = sum(crit_scores) / len(crit_scores) if crit_scores else 0.0
-            cov = 0.0
-            if len(crit_scores) > 1 and mean_c > 0:
-                import statistics
-
-                cov = statistics.stdev(crit_scores) / mean_c
-            agreement = max(0.0, min(1.0, 1.0 - cov))
-
             criteria_evaluations[c.name] = CriterionEvaluation(
                 weighted_mean_score=weighted_mean,
                 min_juror_score=min(crit_scores) if crit_scores else 0.0,
                 max_juror_score=max(crit_scores) if crit_scores else 0.0,
-                juror_agreement=agreement,
+                juror_agreement=_criterion_agreement(crit_scores),
                 weight=c.weight,
                 explanations=explanations,
             )
@@ -182,58 +249,142 @@ class OpenJury:
             juror_scores=juror_scores,
         )
 
-    def score_response(
+    def _assemble_eval_result(
+        self,
+        *,
+        prompt: str,
+        trial: TrialResult,
+        juror_scores: List[JurorScore],
+        juror_failures: List[JurorFailure],
+        endpoint_alias: Optional[str] = None,
+        model_name: Optional[str] = None,
+        fetch_metadata=None,
+        consistency_result=None,
+        trial_results: Optional[List[TrialResult]] = None,
+    ) -> AgentEvalResult:
+        composite_score = trial.scored_metrics.weighted_mean
+        normalized = (
+            composite_score / self.config.score_scale
+            if self.config.score_scale
+            else 0.0
+        )
+        return AgentEvalResult(
+            jury_name=self.config.name,
+            prompt=prompt,
+            endpoint_alias=endpoint_alias,
+            model_name=model_name,
+            score_scale=self.config.score_scale,
+            composite_score=composite_score,
+            normalized_composite_score=normalized,
+            scored_metrics=trial.scored_metrics,
+            criteria_evaluations=trial.criteria_evaluations,
+            juror_scores=juror_scores,
+            consistency_result=consistency_result,
+            trial_results=trial_results or [trial],
+            fetch_metadata=fetch_metadata,
+            juror_failures=juror_failures,
+        )
+
+    def score_existing_response(
+        self,
+        prompt: str,
+        agent_response: AgentResponse,
+        *,
+        references: Optional[str] = None,
+        case_rules: Optional[str] = None,
+        jurors_to_run: Sequence[str] | None = None,
+        options: ExecutionOptions | None = None,
+    ) -> "AgentEvalResult":
+        """Score a pre-fetched agent response without calling the endpoint again.
+
+        Raises OpenJuryEvaluationError if all jurors fail. Partial juror failures
+        are surfaced in the returned AgentEvalResult.juror_failures list.
+        Use run_jurors() directly for lower-level access to the ScoringResult.
+        """
+        scoring = self.run_jurors(
+            prompt,
+            agent_response,
+            references=references,
+            case_rules=case_rules,
+            jurors_to_run=jurors_to_run,
+            options=options,
+        )
+
+        if not scoring.juror_scores:
+            raise OpenJuryEvaluationError(
+                "All jurors failed to score the response",
+                code=EvaluationErrorCode.ALL_JURORS_FAILED,
+            )
+
+        trial = self._build_trial_result(1, agent_response, scoring.juror_scores)
+        return self._assemble_eval_result(
+            prompt=prompt,
+            trial=trial,
+            juror_scores=scoring.juror_scores,
+            juror_failures=scoring.juror_failures,
+        )
+
+    def evaluate(
         self,
         prompt: str,
         endpoint: AgentEndpoint,
+        *,
         references: Optional[str] = None,
         case_rules: Optional[str] = None,
+        options: ExecutionOptions | None = None,
     ) -> AgentEvalResult:
-        """Evaluate one prompt against one endpoint. If num_trials > 1, additional
-        trials are run as a consistency audit; quality score comes from trial 1."""
+        """Fetch from endpoint and score the response."""
+        opts = self._resolve_options(options)
 
         logger.info(
             f"Starting evaluation: prompt='{prompt[:60]}...' "
             f"endpoint={endpoint.alias or endpoint.url}"
         )
 
-        # Trial 1 — primary quality evaluation
-        responses = fetch_all_responses([endpoint], prompt)
-        if not responses:
+        fetch_result = fetch_agent_response(endpoint, prompt, options=opts)
+        trial1_response = fetch_result.response
+
+        scoring1 = self.run_jurors(
+            prompt,
+            trial1_response,
+            references=references,
+            case_rules=case_rules,
+            options=opts,
+        )
+        if not scoring1.juror_scores:
             raise OpenJuryEvaluationError(
-                f"No response fetched from endpoint {endpoint.alias or endpoint.url}"
+                "All jurors failed to score trial 1 response",
+                code=EvaluationErrorCode.ALL_JURORS_FAILED,
             )
-        trial1_response = responses[0]
-
-        juror_scores_t1 = self._run_jurors(
-            prompt, trial1_response, references, case_rules
-        )
-        trial1 = self._build_trial_result(1, trial1_response, juror_scores_t1)
-
-        composite_score = trial1.scored_metrics.weighted_mean
-        normalized = (
-            composite_score / self.config.score_scale
-            if self.config.score_scale
-            else 0.0
-        )
-
+        trial1 = self._build_trial_result(1, trial1_response, scoring1.juror_scores)
         trial_results = [trial1]
 
-        # Consistency audit (trials 2..N)
         consistency_result = None
         if self.config.num_trials > 1:
-            composite_scores = [composite_score]
+            composite_scores = [trial1.scored_metrics.weighted_mean]
             for trial_n in range(2, self.config.num_trials + 1):
-                trial_responses = fetch_all_responses([endpoint], prompt)
-                if not trial_responses:
-                    logger.warning(f"Trial {trial_n} got no response; skipping")
+                opts.check_cancelled()
+                try:
+                    trial_fetch = fetch_agent_response(endpoint, prompt, options=opts)
+                except Exception as exc:
+                    logger.warning(f"Trial {trial_n} fetch failed: {exc}")
                     continue
-                trial_resp = trial_responses[0]
-                juror_scores_tn = self._run_jurors(
-                    prompt, trial_resp, references, case_rules
+
+                trial_scoring = self.run_jurors(
+                    prompt,
+                    trial_fetch.response,
+                    references=references,
+                    case_rules=case_rules,
+                    options=opts,
                 )
+                if not trial_scoring.juror_scores:
+                    logger.warning(f"Trial {trial_n} got no juror scores; skipping")
+                    continue
+
                 trial_n_result = self._build_trial_result(
-                    trial_n, trial_resp, juror_scores_tn
+                    trial_n,
+                    trial_fetch.response,
+                    trial_scoring.juror_scores,
                 )
                 trial_results.append(trial_n_result)
                 composite_scores.append(trial_n_result.scored_metrics.weighted_mean)
@@ -243,21 +394,135 @@ class OpenJury:
                     composite_scores
                 )
 
-        return AgentEvalResult(
-            jury_name=self.config.name,
+        result = self._assemble_eval_result(
             prompt=prompt,
+            trial=trial1,
+            juror_scores=scoring1.juror_scores,
+            juror_failures=scoring1.juror_failures,
             endpoint_alias=endpoint.alias,
             model_name=endpoint.model_name,
-            score_scale=self.config.score_scale,
-            composite_score=composite_score,
-            normalized_composite_score=normalized,
-            scored_metrics=trial1.scored_metrics,
-            criteria_evaluations=trial1.criteria_evaluations,
-            juror_scores=juror_scores_t1,
-            has_custom_score=self.config.custom_scoring_function is not None,
+            fetch_metadata=fetch_result.metadata,
             consistency_result=consistency_result,
             trial_results=trial_results,
         )
+        return result
+
+    def score_response(
+        self,
+        prompt: str,
+        endpoint: AgentEndpoint,
+        *,
+        references: Optional[str] = None,
+        case_rules: Optional[str] = None,
+        options: ExecutionOptions | None = None,
+    ) -> AgentEvalResult:
+        """Backward-compatible alias for :meth:`evaluate`."""
+        return self.evaluate(
+            prompt,
+            endpoint,
+            references=references,
+            case_rules=case_rules,
+            options=options,
+        )
+
+    def _evaluate_one_item(
+        self,
+        item: EvaluationItem,
+        index: int,
+        endpoint: AgentEndpoint,
+        *,
+        references: Optional[str],
+        case_rules: Optional[str],
+        options: ExecutionOptions,
+    ) -> ItemEvalResult:
+        options.check_cancelled()
+        # Create a per-item copy so concurrent threads never race on shared mutable state.
+        # Preserve the shared semaphore so the global outbound-request limit still applies.
+        item_opts = dataclasses.replace(
+            options,
+            ground_truth=(
+                item.ground_truth
+                if item.ground_truth is not None
+                else options.ground_truth
+            ),
+            idempotency_key=(
+                item.item_id if item.item_id is not None else options.idempotency_key
+            ),
+        )
+        item_opts._outbound_semaphore = options._outbound_semaphore
+
+        if options.on_progress is not None:
+            options.on_progress(
+                ProgressEvent(
+                    type=ProgressEventType.ITEM_STARTED,
+                    item_index=index,
+                    item_id=item.item_id,
+                )
+            )
+        try:
+            result = self.evaluate(
+                prompt=item.prompt,
+                endpoint=endpoint,
+                references=references,
+                case_rules=case_rules,
+                options=item_opts,
+            )
+            if options.on_progress is not None:
+                options.on_progress(
+                    ProgressEvent(
+                        type=ProgressEventType.ITEM_COMPLETED,
+                        item_index=index,
+                        item_id=item.item_id,
+                    )
+                )
+            return ItemEvalResult(item=item, index=index, result=result)
+        except Exception as exc:
+            logger.error(f"Failed to evaluate item {index}: {exc}")
+            return ItemEvalResult(item=item, index=index, error=exc)
+
+    def evaluate_items(
+        self,
+        items: Sequence[EvaluationItem],
+        endpoint: AgentEndpoint,
+        *,
+        references: Optional[str] = None,
+        case_rules: Optional[str] = None,
+        options: ExecutionOptions | None = None,
+        on_item_complete: Callable[[ItemEvalResult], None] | None = None,
+    ) -> List[ItemEvalResult]:
+        """Evaluate multiple dataset items with bounded concurrency."""
+        opts = self._resolve_options(options)
+        if not items:
+            return []
+
+        results: List[Optional[ItemEvalResult]] = [None] * len(items)
+        max_workers = min(len(items), max(1, opts.max_item_workers))
+
+        def run_index(index: int, item: EvaluationItem) -> None:
+            item_result = self._evaluate_one_item(
+                item,
+                index,
+                endpoint,
+                references=references,
+                case_rules=case_rules,
+                options=opts,
+            )
+            results[index] = item_result
+            if on_item_complete is not None:
+                on_item_complete(item_result)
+
+        if max_workers > 1:
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                futures = [
+                    executor.submit(run_index, i, item) for i, item in enumerate(items)
+                ]
+                for future in futures:
+                    future.result()
+        else:
+            for index, item in enumerate(items):
+                run_index(index, item)
+
+        return [r for r in results if r is not None]
 
     def score_batch(
         self,
@@ -265,24 +530,33 @@ class OpenJury:
         endpoint: AgentEndpoint,
         references: Optional[str] = None,
         case_rules: Optional[str] = None,
+        *,
+        options: ExecutionOptions | None = None,
     ) -> List[AgentEvalResult]:
         """Evaluate multiple prompts against one endpoint sequentially."""
+        items = [EvaluationItem(prompt=prompt) for prompt in prompts]
+        batch_options = dataclasses.replace(
+            self._resolve_options(options), max_item_workers=1
+        )
+        item_results = self.evaluate_items(
+            items,
+            endpoint,
+            references=references,
+            case_rules=case_rules,
+            options=batch_options,
+        )
         results: List[AgentEvalResult] = []
-        for i, prompt in enumerate(prompts, 1):
-            logger.info(f"Batch prompt {i}/{len(prompts)}: {prompt[:60]}...")
-            try:
-                result = self.score_response(
-                    prompt=prompt,
-                    endpoint=endpoint,
-                    references=references,
-                    case_rules=case_rules,
-                )
-                results.append(result)
-            except Exception as e:
-                logger.error(f"Failed to score prompt {i}: {e}")
+        for i, item_result in enumerate(item_results, 1):
+            if item_result.error is not None:
                 raise OpenJuryEvaluationError(
-                    f"Failed to score prompt {i}/{len(prompts)}: {e}"
-                ) from e
+                    f"Failed to score prompt {i}/{len(prompts)}: {item_result.error}"
+                ) from item_result.error
+            if item_result.result is None:
+                raise OpenJuryEvaluationError(
+                    f"Prompt {i}/{len(prompts)}: evaluation completed with no result",
+                    code=EvaluationErrorCode.ALL_JURORS_FAILED,
+                )
+            results.append(item_result.result)
         return results
 
     def get_summary(self) -> dict:  # type: ignore[type-arg]
@@ -296,7 +570,7 @@ class OpenJury:
             "jurors": [
                 {
                     "name": juror.name,
-                    "model": juror.config.model_name,
+                    "model": juror.llm_config.model_name,
                     "weight": juror.config.weight,
                 }
                 for juror in self.jurors

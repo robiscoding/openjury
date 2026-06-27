@@ -8,9 +8,8 @@ Usage:
     python basic_jury_run.py
 
 Environment:
-    OPENROUTER_API_KEY  — juror models via OpenRouter (default provider)
-    OPENAI_API_KEY      — juror models via OpenAI (set LLM_PROVIDER=openai)
-    AGENT_API_KEY       — your agent endpoint API key (used in endpoints.json)
+    OPENAI_API_KEY  — juror models (see config.json llm_provider)
+    AGENT_API_KEY   — your agent endpoint API key (used in endpoints.json)
 """
 
 import json

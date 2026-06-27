@@ -1,4 +1,3 @@
-import os
 import sys
 from pathlib import Path
 
@@ -6,14 +5,14 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from openjury.config import AgentResponse, CriterionConfig, JurorConfig, JuryConfig
-
-
-@pytest.fixture(autouse=True)
-def setup_test_env():
-    os.environ["OPENROUTER_API_KEY"] = "test-api-key"
-    os.environ["LLM_PROVIDER"] = "openrouter"
-    yield
+from openjury.config import (
+    AgentResponse,
+    CriterionConfig,
+    JurorConfig,
+    JurorProvider,
+    JuryConfig,
+    LLMProviderConfig,
+)
 
 
 @pytest.fixture
@@ -38,18 +37,28 @@ def sample_criteria():
 
 
 @pytest.fixture
+def sample_llm_provider():
+    return LLMProviderConfig(
+        provider=JurorProvider.OPENAI_COMPATIBLE,
+        model_name="gpt-3.5-turbo",
+        api_key="test-api-key",
+    )
+
+
+@pytest.fixture
 def sample_jurors():
     return [
-        JurorConfig(name="Expert Juror", model_name="gpt-3.5-turbo", weight=2.0),
-        JurorConfig(name="General Juror", model_name="gpt-3.5-turbo", weight=1.0),
+        JurorConfig(name="Expert Juror", weight=2.0),
+        JurorConfig(name="General Juror", weight=1.0),
     ]
 
 
 @pytest.fixture
-def sample_jury_config(sample_criteria, sample_jurors):
+def sample_jury_config(sample_criteria, sample_jurors, sample_llm_provider):
     return JuryConfig(
         name="Test Jury",
         description="A test jury for unit tests",
+        llm_provider=sample_llm_provider,
         criteria=sample_criteria,
         jurors=sample_jurors,
         score_scale=5,

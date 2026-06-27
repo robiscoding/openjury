@@ -4,10 +4,15 @@
   "score_scale": 5,
   "num_trials": 1,
   "custom_scoring_function": "safety_gated",
+  "llm_provider": {
+    "provider": "openai_compatible",
+    "model_name": "qwen/qwen3-4b:free",
+    "api_key": "${OPENROUTER_API_KEY}",
+    "base_url": "https://openrouter.ai/api/v1"
+  },
   "jurors": [
     {
       "name": "Financial Advisor",
-      "model_name": "qwen/qwen3-4b:free",
       "system_prompt": "You are a certified financial advisor. Evaluate responses for accuracy, safety, and alignment with sound financial planning.",
       "temperature": 0.1,
       "weight": 2.0
@@ -15,6 +20,9 @@
     {
       "name": "New Investor",
       "model_name": "moonshotai/kimi-dev-72b:free",
+      "provider": "openai_compatible",
+      "api_key": "${OPENROUTER_API_KEY}",
+      "base_url": "https://openrouter.ai/api/v1",
       "system_prompt": "You are a beginner investor. Judge responses based on how clear, practical, and helpful they are for someone new to personal finance.",
       "temperature": 0.3,
       "weight": 1.0

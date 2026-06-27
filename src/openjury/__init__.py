@@ -4,10 +4,39 @@ from openjury.config import (
     AgentResponse,
     CriterionConfig,
     JurorConfig,
+    JurorProvider,
     JuryConfig,
+    LLMProviderConfig,
     VotingCriteria,
 )
-from openjury.endpoint_fetcher import AgentEndpoint, EndpointFetchError
+from openjury.endpoint_fetcher import (
+    AgentEndpoint,
+    fetch_agent_response,
+    fetch_response,
+)
+from openjury.env import ConfigurationError
+from openjury.errors import (
+    EndpointErrorCode,
+    EndpointFetchError,
+    EvaluationErrorCode,
+    InitializationErrorCode,
+    JurorErrorCode,
+    JurorException,
+    OpenJuryError,
+    OpenJuryEvaluationError,
+    OpenJuryInitializationError,
+)
+from openjury.execution import (
+    EvaluationItem,
+    ExecutionOptions,
+    FetchMetadata,
+    FetchResult,
+    ItemEvalResult,
+    JurorFailure,
+    ProgressEvent,
+    ProgressEventType,
+    ScoringResult,
+)
 from openjury.juror import Juror
 from openjury.jury_engine import OpenJury
 from openjury.output_format import (
@@ -15,6 +44,8 @@ from openjury.output_format import (
     CriterionEvaluation,
     ResultFormatter,
     TrialResult,
+    juror_score_to_dict,
+    serialize_eval_result,
 )
 from openjury.scoring import (
     ConsistencyResult,
@@ -32,12 +63,35 @@ __all__ = [
     # Config models
     "JuryConfig",
     "JurorConfig",
+    "JurorProvider",
+    "LLMProviderConfig",
     "CriterionConfig",
     "AgentResponse",
     "VotingCriteria",
+    # Errors
+    "ConfigurationError",
+    "OpenJuryError",
+    "EndpointFetchError",
+    "EndpointErrorCode",
+    "JurorException",
+    "JurorErrorCode",
+    "OpenJuryEvaluationError",
+    "OpenJuryInitializationError",
+    "EvaluationErrorCode",
+    "InitializationErrorCode",
+    # Execution
+    "ExecutionOptions",
+    "ProgressEvent",
+    "ProgressEventType",
+    "FetchResult",
+    "FetchMetadata",
+    "EvaluationItem",
+    "ItemEvalResult",
+    "ScoringResult",
+    "JurorFailure",
     # Endpoint fetching
     "AgentEndpoint",
-    "EndpointFetchError",
+    "fetch_agent_response",
     # Scoring
     "ScoreAggregator",
     "ScoredMetrics",
@@ -49,6 +103,8 @@ __all__ = [
     "CriterionEvaluation",
     "TrialResult",
     "ResultFormatter",
+    "serialize_eval_result",
+    "juror_score_to_dict",
     # CLI (lazy)
     "cli_app",
 ]

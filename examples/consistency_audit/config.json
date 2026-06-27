@@ -3,10 +3,15 @@
   "description": "Evaluates agent response quality and measures response-to-response consistency across multiple trials.",
   "score_scale": 5,
   "num_trials": 3,
+  "llm_provider": {
+    "provider": "openai_compatible",
+    "model_name": "qwen/qwen3-4b:free",
+    "api_key": "${OPENROUTER_API_KEY}",
+    "base_url": "https://openrouter.ai/api/v1"
+  },
   "jurors": [
     {
       "name": "Quality Assessor",
-      "model_name": "qwen/qwen3-4b:free",
       "system_prompt": "You are evaluating the quality of a customer support agent's response. Be consistent and objective.",
       "temperature": 0.1,
       "weight": 1.5
@@ -14,6 +19,9 @@
     {
       "name": "Customer Perspective",
       "model_name": "mistralai/devstral-small-2505:free",
+      "provider": "openai_compatible",
+      "api_key": "${OPENROUTER_API_KEY}",
+      "base_url": "https://openrouter.ai/api/v1",
       "system_prompt": "You are a customer receiving support. Judge whether the response actually solves your problem.",
       "temperature": 0.2,
       "weight": 1.0

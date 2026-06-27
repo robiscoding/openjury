@@ -18,11 +18,14 @@ from openjury.endpoint_fetcher import (
     _collect_sse_stream,
     _walk_path,
     build_request_body,
+    fetch_agent_response,
     fetch_all_responses,
     fetch_response,
     load_endpoints_file,
     resolve_headers,
 )
+from openjury.errors import EndpointErrorCode
+from openjury.execution import ExecutionOptions
 
 
 def test_build_request_body_default_no_stream() -> None:
@@ -90,9 +93,26 @@ def test_walk_path_bad_index() -> None:
         _walk_path({"a": []}, "a.0")
 
 
-def test_walk_path_non_string_leaf() -> None:
-    with pytest.raises(EndpointFetchError, match="Expected string"):
-        _walk_path({"a": 42}, "a")
+def test_build_request_body_ground_truth() -> None:
+    template: Dict[str, Any] = {
+        "prompt": "{prompt}",
+        "reference": "{ground_truth}",
+    }
+    body = build_request_body(
+        template, "user q", stream=False, ground_truth="expected answer"
+    )
+    assert body == {"prompt": "user q", "reference": "expected answer"}
+
+
+def test_build_request_body_unknown_placeholder() -> None:
+    template: Dict[str, Any] = {"text": "{unknown}"}
+    with pytest.raises(EndpointFetchError, match="Unknown template placeholder"):
+        build_request_body(template, "q", stream=False)
+
+
+def test_walk_path_forbidden_segment() -> None:
+    with pytest.raises(EndpointFetchError, match="Forbidden"):
+        _walk_path({"__proto__": "bad"}, "__proto__")
 
 
 def _mock_response(json_data: Dict[str, Any], status_code: int = 200) -> MagicMock:
@@ -192,10 +212,23 @@ def _sse_lines(chunks: List[str], done: bool = True) -> List[str]:
     return lines
 
 
+def _collect_sse(
+    mock_resp: MagicMock, response_path: str = "choices.0.delta.content"
+) -> str:
+    content, _metadata = _collect_sse_stream(
+        mock_resp,
+        response_path,
+        ExecutionOptions(stream_idle_timeout_s=30.0),
+        idle_timeout_s=30.0,
+        alias="test",
+    )
+    return content
+
+
 def test_collect_sse_stream_assembles_chunks() -> None:
     mock_resp = MagicMock()
     mock_resp.iter_lines.return_value = iter(_sse_lines(["Hello", ", ", "world", "!"]))
-    result = _collect_sse_stream(mock_resp, "choices.0.delta.content")
+    result = _collect_sse(mock_resp)
     assert result == "Hello, world!"
 
 
@@ -207,8 +240,73 @@ def test_collect_sse_stream_skips_empty_deltas() -> None:
     ]
     mock_resp = MagicMock()
     mock_resp.iter_lines.return_value = iter(lines)
-    result = _collect_sse_stream(mock_resp, "choices.0.delta.content")
+    result = _collect_sse(mock_resp)
     assert result == "hi"
+
+
+def test_collect_sse_stream_multiline_data_field() -> None:
+    payload = json.dumps({"choices": [{"delta": {"content": "ab"}}]})
+    mid = len(payload) // 2
+    lines = [
+        "data: " + payload[:mid],
+        "data: " + payload[mid:],
+        "",
+        "data: [DONE]",
+    ]
+    mock_resp = MagicMock()
+    mock_resp.iter_lines.return_value = iter(lines)
+    result = _collect_sse(mock_resp)
+    assert result == "ab"
+
+
+def test_collect_sse_stream_response_too_large() -> None:
+    huge = "x" * 200
+    lines = [
+        "data: " + json.dumps({"choices": [{"delta": {"content": huge}}]}),
+        "data: [DONE]",
+    ]
+    mock_resp = MagicMock()
+    mock_resp.iter_lines.return_value = iter(lines)
+    options = ExecutionOptions(max_agent_response_bytes=50)
+    with pytest.raises(EndpointFetchError, match="accumulated response exceeds"):
+        _collect_sse_stream(
+            mock_resp,
+            "choices.0.delta.content",
+            options,
+            idle_timeout_s=30.0,
+            alias="test",
+        )
+
+
+def test_fetch_agent_response_sets_idempotency_header() -> None:
+    ep = AgentEndpoint(url="http://localhost:8080/v1")
+    with patch("httpx.Client") as mock_client_cls:
+        mock_client = MagicMock()
+        mock_client_cls.return_value.__enter__.return_value = mock_client
+        mock_client.post.return_value = _mock_response(
+            {"choices": [{"message": {"content": "ok"}}]}
+        )
+
+        fetch_agent_response(
+            ep,
+            "q",
+            options=ExecutionOptions(idempotency_key="exe_123"),
+        )
+
+        headers = mock_client.post.call_args.kwargs["headers"]
+        assert headers["Idempotency-Key"] == "exe_123"
+
+
+def test_fetch_response_http_error_has_code() -> None:
+    ep = AgentEndpoint(url="http://localhost:9999/chat")
+    with patch("httpx.Client") as mock_client_cls:
+        mock_client = MagicMock()
+        mock_client_cls.return_value.__enter__.return_value = mock_client
+        mock_client.post.return_value = _mock_response({}, status_code=401)
+
+        with pytest.raises(EndpointFetchError) as exc_info:
+            fetch_response(ep, "test")
+        assert exc_info.value.code == EndpointErrorCode.ENDPOINT_HTTP_ERROR
 
 
 def test_fetch_response_streaming_sse() -> None:

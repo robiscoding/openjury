@@ -2,6 +2,20 @@
 
 Wrap OpenJury in a Flask HTTP API. Clients POST a prompt and an endpoint spec; the server fetches the agent response and returns an `AgentEvalResult`.
 
+## What you'll learn
+
+- Exposing OpenJury as an HTTP API with Flask
+- Passing endpoint specs from clients with `${ENV_VAR}` credential resolution
+- Serializing `AgentEvalResult` as JSON responses
+
+## Prerequisites
+
+| Requirement | Notes |
+|-------------|-------|
+| `pip install flask` | Not included in openjury core deps |
+| `OPENROUTER_API_KEY` or `OPENAI_API_KEY` | Per your config |
+| Agent or mock | For `/evaluate` calls |
+
 ## When to use this
 
 Useful when:
@@ -101,3 +115,8 @@ python web_integration.py
 - This example runs Flask in debug mode on port 5000 — use a proper WSGI server (gunicorn, uvicorn) in production.
 - Jury initialization is synchronous at startup. For high-concurrency deployments, consider pre-loading and sharing a single `OpenJury` instance (already done in the example).
 - `score_response()` is blocking; wrap in a task queue (Celery, RQ) for async evaluation.
+
+## Next steps
+
+- [docs/composable-api.md](../../docs/composable-api.md)
+- [recipes/crash-recovery-resume.md](../../recipes/crash-recovery-resume.md)

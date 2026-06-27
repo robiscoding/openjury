@@ -2,6 +2,19 @@
 
 Run many prompts through the same jury configuration, recording an `AgentEvalResult` per prompt. Results are written as JSONL — one object per line.
 
+## What you'll learn
+
+- JSONL/CSV dataset formats for batch evaluation
+- CLI `batch-eval` and Python `evaluate_items()` patterns
+- Analyzing JSONL output with pandas
+
+## Prerequisites
+
+| Requirement | Notes |
+|-------------|-------|
+| `OPENAI_API_KEY` | Juror LLM calls |
+| Agent or mock | `python ../tools/mock_agent.py --port 8080` |
+
 ## Dataset formats
 
 ### JSONL (recommended)
@@ -131,3 +144,8 @@ See [endpoint fields in the `AgentEndpoint` model](../../src/openjury/endpoint_f
 | `stream` | `false` | `true` = SSE streaming, accumulated before evaluation |
 | `response_path` | `choices.0.message.content` | Dot-notation path into response JSON |
 | `timeout_s` | `60.0` | Per-request timeout |
+
+## Next steps
+
+- [recipes/batch-eval-pipeline.md](../../recipes/batch-eval-pipeline.md)
+- [docs/cli.md](../../docs/cli.md)

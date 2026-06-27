@@ -37,7 +37,7 @@ def main() -> None:
 
     print(f"Jury: {jury_config.name}")
     print(f"Trials: {jury_config.num_trials}")
-    print(f"Score scale: 1–{jury_config.score_scale}")
+    print(f"Score scale: 1-{jury_config.score_scale}")
     print()
 
     endpoint = AgentEndpoint(
@@ -57,11 +57,9 @@ def main() -> None:
 
     result = jury.score_response(prompt=prompt, endpoint=endpoint)
 
-    # Print the formatted output — includes the consistency section automatically
     print(ResultFormatter.format_result(result))
     print()
 
-    # Programmatic access
     cr = result.consistency_result
     if cr is not None:
         print("Programmatic consistency access:")
@@ -75,7 +73,6 @@ def main() -> None:
         print(f"  interpretation:          {cr.interpretation}")
         print()
 
-        # Deciding whether to deploy
         if cr.score_std < 0.1:
             print("Decision: agent is consistent — safe to deploy.")
         elif cr.score_std < 0.3:
@@ -87,7 +84,6 @@ def main() -> None:
                 "Decision: high variance — agent is unpredictable; investigate before deploying."
             )
 
-    # Per-trial data (for deep analysis)
     if result.trial_results:
         print()
         print("Per-trial breakdown:")

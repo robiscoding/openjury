@@ -77,32 +77,25 @@ class TestScoredMetrics:
         criteria = _make_criteria()
         scores = _make_juror_scores([1.0, 1.0], [5.0, 5.0])
         metrics = ScoreAggregator.compute_all(scores, criteria)
-        # Weakest link = min over criteria of (min_juror_score * weight / total_weight)
-        # clarity: min=1.0, weight=1, total=3 → 1/3
-        # accuracy: min=5.0, weight=2, total=3 → 10/3
-        assert abs(metrics.weakest_link - 1 / 3) < 0.001
+        # weakest_link = min crit weighted-avg on score scale
+        # clarity weighted_avg = 1.0, accuracy weighted_avg = 5.0 → weakest = 1.0
+        assert abs(metrics.weakest_link - 1.0) < 0.001
 
-    def test_custom_function_registered(self):
+    def test_custom_function_applied(self):
         criteria = _make_criteria()
         scores = _make_juror_scores([4.0], [4.0])
 
         def always_five(juror_scores, crit):
             return 5.0
 
-        ScoreAggregator.register("always_five", always_five)
-        try:
-            metrics = ScoreAggregator.compute_all(
-                scores, criteria, custom_fn_name="always_five"
-            )
-            assert metrics.custom == 5.0
-        finally:
-            ScoreAggregator.unregister("always_five")
+        metrics = ScoreAggregator.compute_all(scores, criteria, custom_fn=always_five)
+        assert metrics.custom == 5.0
 
-    def test_custom_function_unregistered_raises(self):
+    def test_no_custom_function_gives_none(self):
         criteria = _make_criteria()
         scores = _make_juror_scores([4.0], [4.0])
-        with pytest.raises(ValueError, match="not registered"):
-            ScoreAggregator.compute_all(scores, criteria, custom_fn_name="nonexistent")
+        metrics = ScoreAggregator.compute_all(scores, criteria)
+        assert metrics.custom is None
 
     def test_empty_juror_scores_raises(self):
         criteria = _make_criteria()
@@ -146,10 +139,14 @@ class TestConsistencyResult:
         assert result.score_max == 5.0
 
     def test_register_unregister_list(self):
+        import warnings
+
         def dummy(js, cr):
             return 1.0
 
-        ScoreAggregator.register("dummy_fn", dummy)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", DeprecationWarning)
+            ScoreAggregator.register("dummy_fn", dummy)
         assert "dummy_fn" in ScoreAggregator.list_custom()
         ScoreAggregator.unregister("dummy_fn")
         assert "dummy_fn" not in ScoreAggregator.list_custom()

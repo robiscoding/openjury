@@ -1,0 +1,60 @@
+{
+  "name": "OpenRouter Multi-Model Jury",
+  "description": "Diverse jury — default juror uses gpt-4o-mini; other jurors fully override with different OpenRouter models. Each override repeats provider, api_key, and base_url (all-or-nothing rule).",
+  "score_scale": 5,
+  "llm_provider": {
+    "provider": "openai_compatible",
+    "model_name": "openai/gpt-4o-mini",
+    "api_key": "${OPENROUTER_API_KEY}",
+    "base_url": "https://openrouter.ai/api/v1"
+  },
+  "jurors": [
+    {
+      "name": "Fast Judge",
+      "system_prompt": "You are a fast, practical evaluator focused on whether the answer works.",
+      "temperature": 0.1,
+      "weight": 1.0
+    },
+    {
+      "name": "Reasoning Judge",
+      "model_name": "anthropic/claude-3.5-sonnet",
+      "provider": "openai_compatible",
+      "api_key": "${OPENROUTER_API_KEY}",
+      "base_url": "https://openrouter.ai/api/v1",
+      "system_prompt": "You are a careful reasoning-focused evaluator. Look for logical gaps.",
+      "temperature": 0.1,
+      "weight": 2.0
+    },
+    {
+      "name": "Cost-Efficient Judge",
+      "model_name": "google/gemini-2.0-flash-001",
+      "provider": "openai_compatible",
+      "api_key": "${OPENROUTER_API_KEY}",
+      "base_url": "https://openrouter.ai/api/v1",
+      "temperature": 0.1,
+      "weight": 1.0
+    }
+  ],
+  "criteria": [
+    {
+      "name": "helpfulness",
+      "description": "Does the response resolve the user's request?",
+      "weight": 2.0,
+      "rubric": {
+        "1": "Does not address the request",
+        "3": "Partially helpful",
+        "5": "Fully resolves the request"
+      }
+    },
+    {
+      "name": "accuracy",
+      "description": "Is the information correct?",
+      "weight": 2.0,
+      "rubric": {
+        "1": "Material errors",
+        "3": "Mostly correct",
+        "5": "Fully accurate"
+      }
+    }
+  ]
+}

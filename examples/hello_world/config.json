@@ -1,0 +1,44 @@
+{
+  "name": "Hello World Jury",
+  "description": "Minimal jury for the offline quickstart example",
+  "score_scale": 5,
+  "llm_provider": {
+    "provider": "openai_compatible",
+    "model_name": "gpt-4o-mini",
+    "api_key": "${OPENAI_API_KEY}"
+  },
+  "jurors": [
+    {
+      "name": "Expert Juror",
+      "weight": 2.0,
+      "temperature": 0.1
+    },
+    {
+      "name": "General Juror",
+      "weight": 1.0,
+      "temperature": 0.2
+    }
+  ],
+  "criteria": [
+    {
+      "name": "factuality",
+      "description": "How accurate is the response?",
+      "weight": 2.0,
+      "rubric": {
+        "1": "Multiple factual errors",
+        "3": "Mostly accurate with minor issues",
+        "5": "Completely accurate"
+      }
+    },
+    {
+      "name": "clarity",
+      "description": "How clear and understandable is the response?",
+      "weight": 1.0,
+      "rubric": {
+        "1": "Confusing or incoherent",
+        "3": "Understandable with effort",
+        "5": "Crystal clear"
+      }
+    }
+  ]
+}

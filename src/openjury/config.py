@@ -3,7 +3,12 @@ import uuid
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
+
+
+class JurorProvider(str, Enum):
+    OPENAI_COMPATIBLE = "openai_compatible"
+    ANTHROPIC = "anthropic"
 
 
 class VotingCriteria(str, Enum):
@@ -50,12 +55,58 @@ class CriterionConfig(BaseModel):
         return str(v)
 
 
+class LLMProviderConfig(BaseModel):
+    provider: JurorProvider = Field(
+        ...,
+        description=(
+            "LLM provider. 'openai_compatible' works with OpenAI, OpenRouter, xAI, "
+            "Gemini, Ollama, vLLM, or any OpenAI-compatible endpoint. "
+            "'anthropic' uses the Anthropic API directly (requires openjury[anthropic])."
+        ),
+    )
+    model_name: str = Field(..., description="LLM model identifier for this provider")
+    api_key: str = Field(
+        ...,
+        description="API key for this provider. Supports ${ENV_VAR} interpolation.",
+    )
+    base_url: Optional[str] = Field(
+        default=None,
+        description=(
+            "Optional base URL for openai_compatible providers. "
+            "Supports ${ENV_VAR} interpolation. Not used for anthropic."
+        ),
+    )
+
+
 class JurorConfig(BaseModel):
 
     name: str = Field(..., description="Name or identifier for this juror")
-    model_name: str = Field(
-        default="openrouter/horizon-alpha",
-        description="LLM model to use for this juror",
+    model_name: Optional[str] = Field(
+        default=None,
+        description=(
+            "LLM model override. Must be set together with api_key and provider "
+            "to override the jury-level llm_provider."
+        ),
+    )
+    provider: Optional[JurorProvider] = Field(
+        default=None,
+        description=(
+            "LLM provider override. Must be set together with model_name and api_key."
+        ),
+    )
+    api_key: Optional[str] = Field(
+        default=None,
+        description=(
+            "API key override. Must be set together with model_name and provider. "
+            "Supports ${ENV_VAR} interpolation."
+        ),
+    )
+    base_url: Optional[str] = Field(
+        default=None,
+        description=(
+            "Optional base URL when this juror fully overrides llm_provider. "
+            "Supports ${ENV_VAR} interpolation. Not used for anthropic."
+        ),
     )
     system_prompt: Optional[str] = Field(
         None, description="Custom system prompt for this juror"
@@ -67,12 +118,31 @@ class JurorConfig(BaseModel):
         default=1.0, ge=0.0, description="Weight for this juror's vote"
     )
 
+    @model_validator(mode="after")
+    def validate_provider_override(self) -> "JurorConfig":
+        override_fields = (self.model_name, self.api_key, self.provider)
+        set_count = sum(1 for value in override_fields if value is not None)
+        if set_count not in (0, 3):
+            raise ValueError(
+                f"Juror '{self.name}' must set model_name, api_key, and provider "
+                "together to override llm_provider, or omit all three to inherit "
+                "the jury-level llm_provider."
+            )
+        return self
+
 
 class JuryConfig(BaseModel):
 
     name: str = Field(..., description="Name for this jury configuration")
     description: Optional[str] = Field(
         None, description="Description of what this jury evaluates"
+    )
+    llm_provider: Optional[LLMProviderConfig] = Field(
+        default=None,
+        description=(
+            "Default LLM provider settings for jurors that do not fully override "
+            "with their own model_name, api_key, and provider."
+        ),
     )
     criteria: List[CriterionConfig] = Field(
         ..., description="List of evaluation criteria"
@@ -107,9 +177,6 @@ class JuryConfig(BaseModel):
     )
     max_retries: int = Field(
         default=3, ge=0, description="Max retries for failed juror calls"
-    )
-    custom_settings: Dict[str, Any] = Field(
-        default_factory=dict, description="Additional custom settings"
     )
     evaluation_template: Optional[str] = Field(
         default=None,
@@ -162,3 +229,36 @@ class AgentResponse(BaseModel):
 
     def get_display_name(self) -> str:
         return self.alias or self.id
+
+
+def resolve_juror_llm_config(
+    juror: JurorConfig,
+    jury_llm_provider: Optional[LLMProviderConfig],
+) -> LLMProviderConfig:
+    """Resolve the effective LLM provider config for a juror.
+
+    Jurors either inherit the full jury-level llm_provider or override it by setting
+    model_name, api_key, and provider together. Partial overrides are invalid.
+    """
+    from openjury.env import ConfigurationError
+
+    if (
+        juror.model_name is not None
+        and juror.api_key is not None
+        and juror.provider is not None
+    ):
+        return LLMProviderConfig(
+            provider=juror.provider,
+            model_name=juror.model_name,
+            api_key=juror.api_key,
+            base_url=juror.base_url,
+        )
+
+    if jury_llm_provider is None:
+        raise ConfigurationError(
+            f"Juror '{juror.name}' has no LLM provider configuration. "
+            "Set llm_provider on JuryConfig or provide model_name, api_key, and "
+            "provider on the juror."
+        )
+
+    return jury_llm_provider

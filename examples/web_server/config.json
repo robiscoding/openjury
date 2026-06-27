@@ -3,10 +3,15 @@
   "description": "Evaluates a customer support agent's responses for helpfulness, accuracy, and tone.",
   "score_scale": 5,
   "num_trials": 1,
+  "llm_provider": {
+    "provider": "openai_compatible",
+    "model_name": "qwen/qwen3-4b:free",
+    "api_key": "${OPENROUTER_API_KEY}",
+    "base_url": "https://openrouter.ai/api/v1"
+  },
   "jurors": [
     {
       "name": "Support Expert",
-      "model_name": "qwen/qwen3-4b:free",
       "system_prompt": "You are a senior customer support manager. Evaluate responses for how well they resolve customer issues.",
       "temperature": 0.1,
       "weight": 2.0
@@ -14,6 +19,9 @@
     {
       "name": "Customer Perspective",
       "model_name": "mistralai/devstral-small-2505:free",
+      "provider": "openai_compatible",
+      "api_key": "${OPENROUTER_API_KEY}",
+      "base_url": "https://openrouter.ai/api/v1",
       "system_prompt": "You are a customer receiving support. Judge responses based on whether they actually help you solve your problem.",
       "temperature": 0.3,
       "weight": 1.0
