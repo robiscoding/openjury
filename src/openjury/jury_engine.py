@@ -3,6 +3,7 @@ import warnings
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Callable, Dict, List, Optional, Sequence
 
+from openjury.assertions import evaluate_assertions, score_assertions
 from openjury.config import AgentResponse, JuryConfig
 from openjury.endpoint_fetcher import AgentEndpoint, fetch_agent_response
 from openjury.errors import (
@@ -241,12 +242,20 @@ class OpenJury:
                 explanations=explanations,
             )
 
+        assertion_results = evaluate_assertions(
+            response.content, self.config.assertions
+        )
+        assertion_score, assertions_passed = score_assertions(assertion_results)
+
         return TrialResult(
             trial_number=trial_number,
             response_text=response.content,
             scored_metrics=scored_metrics,
             criteria_evaluations=criteria_evaluations,
             juror_scores=juror_scores,
+            assertion_results=assertion_results,
+            assertion_score=assertion_score,
+            assertions_passed=assertions_passed,
         )
 
     def _assemble_eval_result(
@@ -268,6 +277,14 @@ class OpenJury:
             if self.config.score_scale
             else 0.0
         )
+        meets_assertion_threshold = (
+            self.config.assertion_threshold is None
+            or trial.assertion_score >= self.config.assertion_threshold
+        )
+        meets_quality_threshold = (
+            self.config.quality_threshold is None
+            or composite_score >= self.config.quality_threshold
+        )
         return AgentEvalResult(
             jury_name=self.config.name,
             prompt=prompt,
@@ -279,6 +296,14 @@ class OpenJury:
             scored_metrics=trial.scored_metrics,
             criteria_evaluations=trial.criteria_evaluations,
             juror_scores=juror_scores,
+            assertion_results=trial.assertion_results,
+            assertion_score=trial.assertion_score,
+            assertions_passed=trial.assertions_passed,
+            passed=(
+                trial.assertions_passed
+                and meets_assertion_threshold
+                and meets_quality_threshold
+            ),
             consistency_result=consistency_result,
             trial_results=trial_results or [trial],
             fetch_metadata=fetch_metadata,
@@ -565,6 +590,9 @@ class OpenJury:
             "description": self.config.description,
             "num_jurors": len(self.jurors),
             "num_criteria": len(self.config.criteria),
+            "num_assertions": len(self.config.assertions),
+            "assertion_threshold": self.config.assertion_threshold,
+            "quality_threshold": self.config.quality_threshold,
             "score_scale": self.config.score_scale,
             "num_trials": self.config.num_trials,
             "jurors": [
@@ -583,6 +611,17 @@ class OpenJury:
                     "has_rubric": criterion.rubric is not None,
                 }
                 for criterion in self.config.criteria
+            ],
+            "assertions": [
+                {
+                    "name": assertion.name,
+                    "type": assertion.type.value,
+                    "value": assertion.value,
+                    "case_sensitive": assertion.case_sensitive,
+                    "required": assertion.required,
+                    "weight": assertion.weight,
+                }
+                for assertion in self.config.assertions
             ],
         }
 

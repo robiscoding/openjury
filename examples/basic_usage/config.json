@@ -20,7 +20,7 @@
             "weight": 1.0
         }
     ],
-    "criteria": [
+  "criteria": [
         {
             "name": "helpfulness",
             "description": "Does the response directly address and resolve the customer's issue?",
@@ -51,7 +51,20 @@
                 "1": "Tone is rude, dismissive, or inappropriate",
                 "3": "Tone is neutral but lacks empathy or warmth",
                 "5": "Tone is professional, empathetic, and perfectly calibrated"
-            }
-        }
-    ]
+      }
+    }
+  ],
+  "assertions": [
+    {
+      "name": "does not expose an internal error",
+      "type": "not_contains",
+      "value": "Internal Server Error",
+      "case_sensitive": false
+    },
+    {
+      "name": "response is concise enough for support",
+      "type": "max_length",
+      "value": 2000
+    }
+  ]
 }

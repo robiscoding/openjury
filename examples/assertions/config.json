@@ -1,0 +1,86 @@
+{
+  "name": "Assertion Examples",
+  "description": "Demonstrates every deterministic assertion type",
+  "score_scale": 5,
+  "llm_provider": {
+    "provider": "openai_compatible",
+    "model_name": "gpt-4o-mini",
+    "api_key": "${OPENAI_API_KEY}"
+  },
+  "jurors": [
+    {
+      "name": "Example Juror"
+    }
+  ],
+  "criteria": [
+    {
+      "name": "helpfulness",
+      "description": "Is the response helpful?"
+    }
+  ],
+  "assertions": [
+    {
+      "name": "contains order number",
+      "type": "contains",
+      "value": "order #12345"
+    },
+    {
+      "name": "does not contain an error",
+      "type": "not_contains",
+      "value": "internal server error",
+      "case_sensitive": false
+    },
+    {
+      "name": "equals the canonical response",
+      "type": "equals",
+      "value": "Status: shipped. Your order #12345 will arrive Friday. Track it at https://example.com/orders/12345"
+    },
+    {
+      "name": "does not equal a refusal",
+      "type": "not_equals",
+      "value": "I cannot help with that."
+    },
+    {
+      "name": "starts with a status",
+      "type": "starts_with",
+      "value": "Status:"
+    },
+    {
+      "name": "ends with the order path",
+      "type": "ends_with",
+      "value": "/orders/12345"
+    },
+    {
+      "name": "mentions a delivery state",
+      "type": "contains_any",
+      "value": [
+        "shipped",
+        "delivered",
+        "delayed"
+      ]
+    },
+    {
+      "name": "includes tracking instructions",
+      "type": "contains_all",
+      "value": [
+        "Track it",
+        "https://"
+      ]
+    },
+    {
+      "name": "contains a five-digit order number",
+      "type": "regex",
+      "value": "order #[0-9]{5}"
+    },
+    {
+      "name": "has enough detail",
+      "type": "min_length",
+      "value": 40
+    },
+    {
+      "name": "stays concise",
+      "type": "max_length",
+      "value": 160
+    }
+  ]
+}

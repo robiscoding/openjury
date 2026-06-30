@@ -5,6 +5,7 @@ Evaluate a single agent response to a single prompt, with a jury of LLM judges.
 ## What this example covers
 
 - Configuring a jury with free-text criteria and structured rubrics
+- Adding deterministic assertions beside model-graded criteria
 - Calling `score_response()` to fetch from an agent endpoint and evaluate
 - Reading the `AgentEvalResult` output — composite score, per-criterion breakdown, all metrics
 
@@ -55,6 +56,19 @@ prompt → your agent endpoint → response text
       }
     }
   ],
+  "assertions": [
+    {
+      "name": "no internal error",
+      "type": "not_contains",
+      "value": "Internal Server Error",
+      "case_sensitive": false
+    },
+    {
+      "name": "concise response",
+      "type": "max_length",
+      "value": 2000
+    }
+  ],
   "jurors": [
     {
       "name": "Juror A",
@@ -77,6 +91,11 @@ More real-world setups (OpenRouter, mixed providers, Ollama, etc.): [`../provide
 | `criteria[].rubric` | `null` | Explicit score anchors per level. Strongly recommended — improves inter-juror reliability |
 | `jurors[].weight` | `1.0` | Relative influence in `weighted_mean`; higher = more authoritative juror |
 | `criteria[].weight` | `1.0` | Relative importance in composite score |
+| `assertions` | `[]` | Deterministic response checks reported separately from juror scores |
+
+Assertions do not alter `composite_score`; inspect
+`result.assertion_results` for their pass/fail outcomes. See the
+[`assertions` example](../assertions/) for all supported types.
 
 \*Required unless every juror sets `model_name`, `api_key`, and `provider` together.
 

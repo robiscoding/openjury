@@ -7,6 +7,7 @@ Runnable demonstrations of OpenJury. Pick a track based on your goal.
 | Example | Track | Prerequisites | Command |
 |---------|-------|---------------|---------|
 | [`hello_world/`](hello_world/) | Try it | None | `python score_existing.py` |
+| [`assertions/`](assertions/) | Try it | None | `python examples/assertions/assertions_demo.py` |
 | [`basic_usage/`](basic_usage/) | Evaluate | `OPENAI_API_KEY`, agent on :8080 | `python basic_jury_run.py` |
 | [`provider_configs/`](provider_configs/) | Config | Provider-specific keys | See provider README |
 | [`batch_eval/`](batch_eval/) | Production | Keys + agent or mock | `python batch_run.py` |

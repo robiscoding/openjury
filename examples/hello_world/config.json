@@ -40,5 +40,18 @@
         "5": "Crystal clear"
       }
     }
+  ],
+  "assertions": [
+    {
+      "name": "mentions OpenJury",
+      "type": "contains",
+      "value": "OpenJury"
+    },
+    {
+      "name": "does not report an internal error",
+      "type": "not_contains",
+      "value": "Internal Server Error",
+      "case_sensitive": false
+    }
   ]
 }

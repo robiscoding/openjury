@@ -19,7 +19,7 @@ See what OpenJury returns in under two minutes — no agent endpoint, no API key
 
 | File | Purpose |
 |------|---------|
-| `config.json` | Minimal jury config (2 jurors, 2 criteria) |
+| `config.json` | Minimal jury config (2 jurors, 2 criteria, 2 assertions) |
 | `score_existing.py` | Offline demo or live scoring script |
 
 ## Run
@@ -27,6 +27,9 @@ See what OpenJury returns in under two minutes — no agent endpoint, no API key
 ```bash
 # Offline — no keys, always succeeds
 python score_existing.py
+
+# If running from the repo root:
+uv run python examples/hello_world/score_existing.py
 
 # Live — real juror LLM calls
 export OPENAI_API_KEY="sk-..."
@@ -42,8 +45,18 @@ Offline demo — sample AgentEvalResult (no API keys required).
   Jury:              Hello World Jury
   ...
   composite_score:   4.17 / 5  (0.834 normalized)
+  assertion_score:   1.000
+  assertions_passed: true
+  passed:             true
   ...
 ```
+
+The example also reports deterministic assertions beside the juror scores:
+
+- `contains` verifies that the response mentions OpenJury.
+- `not_contains` checks that it does not expose an internal server error.
+
+See [`../assertions/`](../assertions/) for every supported assertion type.
 
 ## Next steps
 
