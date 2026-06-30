@@ -19,7 +19,14 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
 
-from openjury import AgentResponse, JuryConfig, OpenJury, ResultFormatter
+from openjury import (
+    AgentResponse,
+    JuryConfig,
+    OpenJury,
+    ResultFormatter,
+    evaluate_assertions,
+    score_assertions,
+)
 from openjury.output_format import AgentEvalResult, CriterionEvaluation, TrialResult
 from openjury.scoring import JurorScore, ScoredMetrics
 
@@ -35,6 +42,9 @@ AGENT_TEXT = (
 
 def demo_result() -> AgentEvalResult:
     """Canned result illustrating AgentEvalResult fields (no LLM calls)."""
+    config = JuryConfig.from_json_file(str(HERE / "config.json"))
+    assertion_results = evaluate_assertions(AGENT_TEXT, config.assertions)
+    assertion_score, assertions_passed = score_assertions(assertion_results)
     juror_scores = [
         JurorScore(
             juror_name="Expert Juror",
@@ -95,6 +105,9 @@ def demo_result() -> AgentEvalResult:
         scored_metrics=metrics,
         criteria_evaluations=criteria_evaluations,
         juror_scores=juror_scores,
+        assertion_results=assertion_results,
+        assertion_score=assertion_score,
+        assertions_passed=assertions_passed,
     )
     return AgentEvalResult(
         jury_name="Hello World Jury",
@@ -105,6 +118,10 @@ def demo_result() -> AgentEvalResult:
         scored_metrics=metrics,
         criteria_evaluations=criteria_evaluations,
         juror_scores=juror_scores,
+        assertion_results=assertion_results,
+        assertion_score=assertion_score,
+        assertions_passed=assertions_passed,
+        passed=assertions_passed,
         trial_results=[trial],
     )
 

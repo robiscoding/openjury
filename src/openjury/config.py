@@ -1,7 +1,8 @@
 import json
+import re
 import uuid
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -23,6 +24,82 @@ class VotingCriteria(str, Enum):
     RELEVANCY = "relevance"
     STYLE = "style"
     CONTEXTUALITY = "contextuality"
+
+
+class AssertionType(str, Enum):
+    """Deterministic checks that can be applied to an agent response."""
+
+    CONTAINS = "contains"
+    NOT_CONTAINS = "not_contains"
+    EQUALS = "equals"
+    NOT_EQUALS = "not_equals"
+    STARTS_WITH = "starts_with"
+    ENDS_WITH = "ends_with"
+    CONTAINS_ANY = "contains_any"
+    CONTAINS_ALL = "contains_all"
+    REGEX = "regex"
+    MIN_LENGTH = "min_length"
+    MAX_LENGTH = "max_length"
+
+
+class AssertionConfig(BaseModel):
+    name: str = Field(..., description="Name or identifier for this assertion")
+    type: AssertionType = Field(..., description="Type of deterministic assertion")
+    value: Union[str, List[str], int] = Field(
+        ...,
+        description=(
+            "Expected string, list of strings for contains_any/contains_all, "
+            "or non-negative integer for min_length/max_length"
+        ),
+    )
+    case_sensitive: bool = Field(
+        default=True,
+        description="Whether string matching should preserve case",
+    )
+    required: bool = Field(
+        default=True,
+        description="Whether this assertion must pass for assertions_passed to be true",
+    )
+    weight: float = Field(
+        default=1.0,
+        gt=0.0,
+        description="Relative weight used to calculate assertion_score",
+    )
+
+    @model_validator(mode="after")
+    def validate_value_for_type(self) -> "AssertionConfig":
+        list_types = {AssertionType.CONTAINS_ANY, AssertionType.CONTAINS_ALL}
+        length_types = {AssertionType.MIN_LENGTH, AssertionType.MAX_LENGTH}
+
+        if self.type in list_types:
+            if (
+                not isinstance(self.value, list)
+                or not self.value
+                or any(not item for item in self.value)
+            ):
+                raise ValueError(
+                    f"{self.type.value} requires a non-empty list of non-empty strings"
+                )
+        elif self.type in length_types:
+            if (
+                not isinstance(self.value, int)
+                or isinstance(self.value, bool)
+                or self.value < 0
+            ):
+                raise ValueError(
+                    f"{self.type.value} requires a non-negative integer value"
+                )
+        elif not isinstance(self.value, str) or not self.value:
+            raise ValueError(f"{self.type.value} requires a non-empty string value")
+
+        if self.type == AssertionType.REGEX:
+            flags = 0 if self.case_sensitive else re.IGNORECASE
+            try:
+                re.compile(self.value, flags)
+            except re.error as exc:
+                raise ValueError(f"Invalid regex pattern: {exc}") from exc
+
+        return self
 
 
 class CriterionConfig(BaseModel):
@@ -147,6 +224,30 @@ class JuryConfig(BaseModel):
     criteria: List[CriterionConfig] = Field(
         ..., description="List of evaluation criteria"
     )
+    assertions: List[AssertionConfig] = Field(
+        default_factory=list,
+        description=(
+            "Deterministic checks applied to each agent response. Assertion results "
+            "are reported separately and do not affect juror-derived scores."
+        ),
+    )
+    assertion_threshold: Optional[float] = Field(
+        default=None,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Optional minimum weighted assertion_score required for passed. "
+            "Required assertions are enforced independently."
+        ),
+    )
+    quality_threshold: Optional[float] = Field(
+        default=None,
+        ge=0.0,
+        description=(
+            "Optional minimum juror-derived composite_score required for passed. "
+            "This does not alter composite_score."
+        ),
+    )
     jurors: List[JurorConfig] = Field(..., description="List of juror configurations")
     score_scale: int = Field(
         default=5,
@@ -186,6 +287,18 @@ class JuryConfig(BaseModel):
             "example_criterion_name, references_section, case_rules_section."
         ),
     )
+
+    @model_validator(mode="after")
+    def validate_quality_threshold(self) -> "JuryConfig":
+        if (
+            self.quality_threshold is not None
+            and self.quality_threshold > self.score_scale
+        ):
+            raise ValueError(
+                "quality_threshold cannot be greater than score_scale "
+                f"({self.score_scale})"
+            )
+        return self
 
     def get_total_juror_weight(self) -> float:
         return sum(juror.weight for juror in self.jurors)

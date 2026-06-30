@@ -66,6 +66,9 @@ def test_serialize_eval_result_is_json_serializable() -> None:
     decoded = json.loads(encoded)
     assert decoded["jury_name"] == "Test Jury"
     assert decoded["composite_score"] == 4.0
+    assert decoded["assertion_score"] == 1.0
+    assert decoded["assertions_passed"] is True
+    assert decoded["passed"] is True
 
 
 def test_serialize_eval_result_includes_juror_scores() -> None:

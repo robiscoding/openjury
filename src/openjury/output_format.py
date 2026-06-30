@@ -1,8 +1,9 @@
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 from pydantic import BaseModel, Field
 
+from openjury.config import AssertionType
 from openjury.execution import FetchMetadata, JurorFailure
 from openjury.scoring import ConsistencyResult, JurorScore, ScoredMetrics
 
@@ -46,6 +47,18 @@ class CriterionEvaluation(BaseModel):
     explanations: Dict[str, str] = Field(default_factory=dict)
 
 
+class AssertionResult(BaseModel):
+    """Result of one deterministic assertion against an agent response."""
+
+    name: str
+    type: AssertionType
+    passed: bool
+    expected: Union[str, List[str], int]
+    detail: str
+    required: bool = True
+    weight: float = Field(default=1.0, gt=0.0)
+
+
 class TrialResult(BaseModel):
     """Scores for one trial (one agent response to the prompt)."""
 
@@ -54,6 +67,9 @@ class TrialResult(BaseModel):
     scored_metrics: ScoredMetrics
     criteria_evaluations: Dict[str, CriterionEvaluation] = Field(default_factory=dict)
     juror_scores: List[JurorScore] = Field(default_factory=list)
+    assertion_results: List[AssertionResult] = Field(default_factory=list)
+    assertion_score: float = 1.0
+    assertions_passed: bool = True
 
     model_config = {"arbitrary_types_allowed": True}
 
@@ -73,6 +89,10 @@ class AgentEvalResult(BaseModel):
     scored_metrics: ScoredMetrics
     criteria_evaluations: Dict[str, CriterionEvaluation] = Field(default_factory=dict)
     juror_scores: List[JurorScore] = Field(default_factory=list)
+    assertion_results: List[AssertionResult] = Field(default_factory=list)
+    assertion_score: float = 1.0
+    assertions_passed: bool = True
+    passed: bool = True
 
     consistency_result: Optional[ConsistencyResult] = None
     trial_results: List[TrialResult] = Field(default_factory=list)
@@ -97,6 +117,9 @@ class ResultFormatter:
             "",
             f"  composite_score:   {result.composite_score:.2f} / {scale}  "
             f"({result.normalized_composite_score:.3f} normalized)",
+            f"  assertion_score:   {result.assertion_score:.3f}",
+            f"  assertions_passed: {str(result.assertions_passed).lower()}",
+            f"  passed:             {str(result.passed).lower()}",
             "",
             "  Scoring Metrics:",
         ]
@@ -132,6 +155,17 @@ class ResultFormatter:
                 for juror_name, expl in ce.explanations.items():
                     snippet = expl[:100].replace("\n", " ")
                     lines.append(f'      {juror_name}: "{snippet}"')
+
+        if result.assertion_results:
+            lines.append("")
+            lines.append("  Assertions:")
+            for assertion in result.assertion_results:
+                status = "PASS" if assertion.passed else "FAIL"
+                policy = "required" if assertion.required else "optional"
+                lines.append(
+                    f"    [{status}] {assertion.name} "
+                    f"({policy}, weight {assertion.weight:g}): {assertion.detail}"
+                )
 
         if result.consistency_result is not None:
             cr = result.consistency_result

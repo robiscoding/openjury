@@ -1,7 +1,10 @@
 from typing import Any
 
+from openjury.assertions import evaluate_assertions, score_assertions
 from openjury.config import (
     AgentResponse,
+    AssertionConfig,
+    AssertionType,
     CriterionConfig,
     JurorConfig,
     JurorProvider,
@@ -41,6 +44,7 @@ from openjury.juror import Juror
 from openjury.jury_engine import OpenJury
 from openjury.output_format import (
     AgentEvalResult,
+    AssertionResult,
     CriterionEvaluation,
     ResultFormatter,
     TrialResult,
@@ -66,6 +70,10 @@ __all__ = [
     "JurorProvider",
     "LLMProviderConfig",
     "CriterionConfig",
+    "AssertionConfig",
+    "AssertionType",
+    "evaluate_assertions",
+    "score_assertions",
     "AgentResponse",
     "VotingCriteria",
     # Errors
@@ -101,6 +109,7 @@ __all__ = [
     # Output
     "AgentEvalResult",
     "CriterionEvaluation",
+    "AssertionResult",
     "TrialResult",
     "ResultFormatter",
     "serialize_eval_result",

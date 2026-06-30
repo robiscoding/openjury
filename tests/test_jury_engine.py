@@ -4,6 +4,7 @@ import pytest
 
 from openjury import AgentResponse, OpenJury
 from openjury.config import (
+    AssertionConfig,
     CriterionConfig,
     JurorConfig,
     JurorProvider,
@@ -83,6 +84,89 @@ class TestScoreResponse:
 
         assert isinstance(result, AgentEvalResult)
         assert result.jury_name == "Test Jury"
+
+    def test_reports_assertion_results(
+        self, mock_juror_class, mock_fetch, sample_jury_config
+    ):
+        mock_resp = self._setup_mocks(mock_juror_class)
+        mock_fetch.return_value = _fetch_result(mock_resp)
+        sample_jury_config.assertions = [
+            AssertionConfig(
+                name="mentions answer",
+                type="contains",
+                value="answer",
+            )
+        ]
+
+        result = OpenJury(sample_jury_config).evaluate(
+            prompt="Q?",
+            endpoint=AgentEndpoint(url="http://localhost/v1"),
+        )
+
+        assert result.assertion_results[0].passed is True
+        assert result.trial_results[0].assertion_results[0].passed is True
+        assert result.assertion_score == 1.0
+        assert result.assertions_passed is True
+        assert result.passed is True
+
+    def test_assertions_control_passed_without_changing_composite_score(
+        self, mock_juror_class, mock_fetch, sample_jury_config
+    ):
+        mock_resp = self._setup_mocks(mock_juror_class, scores=(4.6, 4.6))
+        mock_fetch.return_value = _fetch_result(mock_resp)
+        sample_jury_config.criteria = [
+            CriterionConfig(name="helpfulness", description="H"),
+            CriterionConfig(name="accuracy", description="A"),
+        ]
+        sample_jury_config.assertions = [
+            AssertionConfig(
+                name="confirmation number",
+                type="regex",
+                value=r"CONF-[0-9]+",
+                required=True,
+                weight=1.0,
+            ),
+            AssertionConfig(
+                name="mentions answer",
+                type="contains",
+                value="answer",
+                required=False,
+                weight=4.0,
+            ),
+        ]
+        sample_jury_config.assertion_threshold = 0.8
+        sample_jury_config.quality_threshold = 4.0
+
+        result = OpenJury(sample_jury_config).evaluate(
+            prompt="Q?",
+            endpoint=AgentEndpoint(url="http://localhost/v1"),
+        )
+
+        assert result.composite_score == pytest.approx(4.6)
+        assert result.assertion_score == pytest.approx(0.8)
+        assert result.assertions_passed is False
+        assert result.passed is False
+        assert result.trial_results[0].assertion_score == pytest.approx(0.8)
+
+    def test_quality_threshold_can_fail_otherwise_valid_result(
+        self, mock_juror_class, mock_fetch, sample_jury_config
+    ):
+        mock_resp = self._setup_mocks(mock_juror_class, scores=(4.0, 4.0))
+        mock_fetch.return_value = _fetch_result(mock_resp)
+        sample_jury_config.criteria = [
+            CriterionConfig(name="helpfulness", description="H"),
+            CriterionConfig(name="accuracy", description="A"),
+        ]
+        sample_jury_config.quality_threshold = 4.5
+
+        result = OpenJury(sample_jury_config).evaluate(
+            prompt="Q?",
+            endpoint=AgentEndpoint(url="http://localhost/v1"),
+        )
+
+        assert result.assertion_score == 1.0
+        assert result.assertions_passed is True
+        assert result.passed is False
 
     def test_score_response_is_evaluate_alias(
         self, mock_juror_class, mock_fetch, sample_jury_config
