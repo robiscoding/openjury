@@ -122,11 +122,22 @@ class AssertionConfig(BaseModel):
         return self
 
 
-class AssertionPolicyConfig(BaseModel):
-    """A reusable group of deterministic checks and pass thresholds."""
+class AssertionPolicyDefaults(BaseModel):
+    """Default pass thresholds applied when no item or profile override is set."""
 
+    assertion_threshold: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    quality_threshold: Optional[float] = Field(default=None, ge=0.0)
+
+
+class AssertionProfileConfig(BaseModel):
+    """A reusable group of deterministic checks and optional pass thresholds."""
+
+    name: Optional[str] = Field(
+        default=None,
+        description="Human-readable label for this assertion profile",
+    )
     checks: List[AssertionConfig] = Field(
-        ..., min_length=1, description="Assertions evaluated as one reusable policy"
+        ..., min_length=1, description="Assertions evaluated as one reusable profile"
     )
     assertion_threshold: Optional[float] = Field(default=None, ge=0.0, le=1.0)
     quality_threshold: Optional[float] = Field(default=None, ge=0.0)
@@ -143,23 +154,33 @@ class DatasetItemConfig(BaseModel):
         description="Prompt sent to the agent; accepts 'prompt' as an input alias",
     )
     ground_truth: Optional[str] = None
-    assertion_ids: List[str] = Field(default_factory=list)
+    assertion_profile_ids: List[str] = Field(default_factory=list)
+    assertions: List[AssertionConfig] = Field(
+        default_factory=list,
+        description="Optional inline deterministic checks supplementing globals and profiles",
+    )
+    variables: Dict[str, str] = Field(
+        default_factory=dict,
+        description="Template variables for {{key}} substitution in profile assertions",
+    )
+    assertion_threshold: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    quality_threshold: Optional[float] = Field(default=None, ge=0.0)
 
     @model_validator(mode="before")
     @classmethod
-    def normalize_assertion_ids(cls, value: Any) -> Any:
-        if isinstance(value, dict) and "assertion_ids" not in value:
-            assertion_id = value.get("assertion_id")
-            if assertion_id is not None:
-                return {**value, "assertion_ids": [assertion_id]}
+    def normalize_assertion_profile_ids(cls, value: Any) -> Any:
+        if isinstance(value, dict) and "assertion_profile_ids" not in value:
+            profile_id = value.get("assertion_profile_id")
+            if profile_id is not None:
+                return {**value, "assertion_profile_ids": [profile_id]}
         return value
 
     @model_validator(mode="after")
-    def validate_assertion_ids(self) -> "DatasetItemConfig":
-        if any(not assertion_id for assertion_id in self.assertion_ids):
-            raise ValueError("assertion_ids cannot contain empty strings")
-        if len(self.assertion_ids) != len(set(self.assertion_ids)):
-            raise ValueError("assertion_ids cannot contain duplicates")
+    def validate_assertion_profile_ids(self) -> "DatasetItemConfig":
+        if any(not profile_id for profile_id in self.assertion_profile_ids):
+            raise ValueError("assertion_profile_ids cannot contain empty strings")
+        if len(self.assertion_profile_ids) != len(set(self.assertion_profile_ids)):
+            raise ValueError("assertion_profile_ids cannot contain duplicates")
         return self
 
 
@@ -243,7 +264,6 @@ class LLMProviderConfig(BaseModel):
 
 
 class JurorConfig(BaseModel):
-
     name: str = Field(..., description="Name or identifier for this juror")
     model_name: Optional[str] = Field(
         default=None,
@@ -296,7 +316,6 @@ class JurorConfig(BaseModel):
 
 
 class JuryConfig(BaseModel):
-
     name: str = Field(..., description="Name for this jury configuration")
     description: Optional[str] = Field(
         None, description="Description of what this jury evaluates"
@@ -311,33 +330,23 @@ class JuryConfig(BaseModel):
     criteria: List[CriterionConfig] = Field(
         ..., description="List of evaluation criteria"
     )
-    assertions: Dict[str, AssertionPolicyConfig] = Field(
+    global_assertions: List[AssertionConfig] = Field(
+        default_factory=list,
+        description="Deterministic checks applied automatically to every dataset item",
+    )
+    assertion_profiles: Dict[str, AssertionProfileConfig] = Field(
         default_factory=dict,
         description=(
-            "Reusable assertion policies keyed by IDs referenced from dataset rows. "
-            "Legacy assertion lists are normalized to a policy named 'default'."
+            "Reusable assertion profiles keyed by IDs referenced from dataset rows"
         ),
+    )
+    assertion_policy: AssertionPolicyDefaults = Field(
+        default_factory=AssertionPolicyDefaults,
+        description="Default pass thresholds when no item or profile override is set",
     )
     dataset: List[DatasetItemConfig] = Field(
         default_factory=list,
         description="Inline dataset represented as an array of JSON row objects",
-    )
-    assertion_threshold: Optional[float] = Field(
-        default=None,
-        ge=0.0,
-        le=1.0,
-        description=(
-            "Legacy default assertion threshold. New configs should set this on "
-            "each named AssertionPolicyConfig."
-        ),
-    )
-    quality_threshold: Optional[float] = Field(
-        default=None,
-        ge=0.0,
-        description=(
-            "Legacy default quality threshold. New configs should set this on "
-            "each named AssertionPolicyConfig."
-        ),
     )
     jurors: List[JurorConfig] = Field(..., description="List of juror configurations")
     score_scale: int = Field(
@@ -395,33 +404,29 @@ class JuryConfig(BaseModel):
         ),
     )
 
-    @field_validator("assertions", mode="before")
-    @classmethod
-    def normalize_assertion_registry(cls, value: Any) -> Any:
-        if isinstance(value, list):
-            if not value:
-                return {}
-            return {"default": {"checks": value}}
-        return value
-
     @model_validator(mode="after")
-    def validate_quality_threshold(self) -> "JuryConfig":
+    def validate_assertion_config(self) -> "JuryConfig":
         if (
-            self.quality_threshold is not None
-            and self.quality_threshold > self.score_scale
+            self.assertion_policy.quality_threshold is not None
+            and self.assertion_policy.quality_threshold > self.score_scale
         ):
             raise ValueError(
-                "quality_threshold cannot be greater than score_scale "
-                f"({self.score_scale})"
+                "assertion_policy.quality_threshold cannot be greater than "
+                f"score_scale ({self.score_scale})"
             )
-        for policy_id, policy in self.assertions.items():
+        if "default" in self.assertion_profiles:
+            raise ValueError(
+                "assertion_profiles cannot include a profile named 'default'; "
+                "use global_assertions for checks that apply to every item"
+            )
+        for profile_id, profile in self.assertion_profiles.items():
             if (
-                policy.quality_threshold is not None
-                and policy.quality_threshold > self.score_scale
+                profile.quality_threshold is not None
+                and profile.quality_threshold > self.score_scale
             ):
                 raise ValueError(
-                    f"assertions.{policy_id}.quality_threshold cannot be greater "
-                    f"than score_scale ({self.score_scale})"
+                    f"assertion_profiles.{profile_id}.quality_threshold cannot be "
+                    f"greater than score_scale ({self.score_scale})"
                 )
 
         for criterion in self.criteria:
@@ -461,16 +466,41 @@ class JuryConfig(BaseModel):
         if len(item_ids) != len(set(item_ids)):
             raise ValueError("dataset item ids must be unique")
         for item in self.dataset:
+            if (
+                item.quality_threshold is not None
+                and item.quality_threshold > self.score_scale
+            ):
+                raise ValueError(
+                    f"dataset item '{item.id}' quality_threshold cannot be greater "
+                    f"than score_scale ({self.score_scale})"
+                )
             unknown_ids = [
-                assertion_id
-                for assertion_id in item.assertion_ids
-                if assertion_id not in self.assertions
+                profile_id
+                for profile_id in item.assertion_profile_ids
+                if profile_id not in self.assertion_profiles
             ]
             if unknown_ids:
                 raise ValueError(
-                    f"Dataset item '{item.id}' references unknown assertion_ids "
-                    f"{unknown_ids}"
+                    f"Dataset item '{item.id}' references unknown "
+                    f"assertion_profile_ids {unknown_ids}"
                 )
+            if len(item.assertion_profile_ids) > 1:
+                profiles_with_thresholds = [
+                    profile_id
+                    for profile_id in item.assertion_profile_ids
+                    if (
+                        self.assertion_profiles[profile_id].assertion_threshold
+                        is not None
+                        or self.assertion_profiles[profile_id].quality_threshold
+                        is not None
+                    )
+                ]
+                if profiles_with_thresholds:
+                    raise ValueError(
+                        f"Dataset item '{item.id}' selects multiple assertion profiles "
+                        f"but profiles {profiles_with_thresholds} define thresholds; "
+                        "set thresholds on the item or select a single profile"
+                    )
         return self
 
     def get_total_juror_weight(self) -> float:

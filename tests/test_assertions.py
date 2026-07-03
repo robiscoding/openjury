@@ -98,9 +98,10 @@ def test_assertions_default_to_empty(
         jurors=sample_jurors,
     )
 
-    assert config.assertions == {}
-    assert config.assertion_threshold is None
-    assert config.quality_threshold is None
+    assert config.global_assertions == []
+    assert config.assertion_profiles == {}
+    assert config.assertion_policy.assertion_threshold is None
+    assert config.assertion_policy.quality_threshold is None
 
 
 def test_assertion_score_is_weighted_and_required_policy_is_separate() -> None:
@@ -184,7 +185,7 @@ def test_quality_threshold_cannot_exceed_score_scale(
             criteria=sample_criteria,
             jurors=sample_jurors,
             score_scale=5,
-            quality_threshold=5.1,
+            assertion_policy={"quality_threshold": 5.1},
         )
 
 

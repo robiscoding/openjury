@@ -5,6 +5,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
+from openjury.assertion_resolution import resolve_item_assertions
 from openjury.assertions import evaluate_assertions, score_assertions
 from openjury.batch_summary import BatchEvalResult, aggregate_batch_results
 from openjury.config import AgentResponse, AssertionConfig, JuryConfig
@@ -295,31 +296,17 @@ class OpenJury:
         assertion_threshold: Optional[float],
         quality_threshold: Optional[float],
     ) -> tuple[Sequence[AssertionConfig], Optional[float], Optional[float]]:
-        default_policy = self.config.assertions.get("default")
-        resolved_assertions = (
-            default_policy.checks
-            if assertions is None and default_policy is not None
-            else ([] if assertions is None else assertions)
-        )
-        resolved_assertion_threshold = (
-            (
-                default_policy.assertion_threshold
-                if default_policy is not None
-                and default_policy.assertion_threshold is not None
-                else self.config.assertion_threshold
-            )
-            if assertion_threshold is None
-            else assertion_threshold
-        )
-        resolved_quality_threshold = (
-            (
-                default_policy.quality_threshold
-                if default_policy is not None
-                and default_policy.quality_threshold is not None
-                else self.config.quality_threshold
-            )
-            if quality_threshold is None
-            else quality_threshold
+        inline_assertions = [] if assertions is None else list(assertions)
+        (
+            resolved_assertions,
+            resolved_assertion_threshold,
+            resolved_quality_threshold,
+        ) = resolve_item_assertions(
+            self.config,
+            profile_ids=[],
+            inline_assertions=inline_assertions,
+            item_assertion_threshold=assertion_threshold,
+            item_quality_threshold=quality_threshold,
         )
         if (
             resolved_assertion_threshold is not None
@@ -428,8 +415,8 @@ class OpenJury:
     ) -> "AgentEvalResult":
         """Score a pre-fetched agent response without calling the endpoint again.
 
-        Per-call assertions replace jury-level assertion defaults. Pass an empty
-        sequence to disable assertions for this response.
+        Per-call assertions supplement global_assertions. Pass an empty sequence
+        for global checks only.
 
         Raises OpenJuryEvaluationError if all jurors fail. Partial juror failures
         are surfaced in the returned AgentEvalResult.juror_failures list.
@@ -485,8 +472,8 @@ class OpenJury:
     ) -> AgentEvalResult:
         """Fetch from endpoint and score the response.
 
-        Per-call assertions replace jury-level assertion defaults. Pass an empty
-        sequence to disable assertions for this evaluation case.
+        Per-call assertions supplement global_assertions. Pass an empty sequence
+        for global checks only.
         """
         opts = self._resolve_options(options)
         contested_threshold = self._resolve_contested_threshold(opts)
@@ -772,7 +759,7 @@ class OpenJury:
             score_scale=self.config.score_scale,
             score_min=self.config.score_min,
             contested_threshold=self._resolve_contested_threshold(opts),
-            quality_threshold=self.config.quality_threshold,
+            quality_threshold=self.config.assertion_policy.quality_threshold,
             duration_ms=duration_ms,
         )
         return BatchEvalResult(
@@ -824,9 +811,10 @@ class OpenJury:
             "description": self.config.description,
             "num_jurors": len(self.jurors),
             "num_criteria": len(self.config.criteria),
-            "num_assertion_policies": len(self.config.assertions),
-            "assertion_threshold": self.config.assertion_threshold,
-            "quality_threshold": self.config.quality_threshold,
+            "num_global_assertions": len(self.config.global_assertions),
+            "num_assertion_profiles": len(self.config.assertion_profiles),
+            "assertion_threshold": self.config.assertion_policy.assertion_threshold,
+            "quality_threshold": self.config.assertion_policy.quality_threshold,
             "score_min": self.config.score_min,
             "score_scale": self.config.score_scale,
             "num_trials": self.config.num_trials,
@@ -847,9 +835,13 @@ class OpenJury:
                 }
                 for criterion in self.config.criteria
             ],
-            "assertions": {
-                policy_id: policy.model_dump(mode="json")
-                for policy_id, policy in self.config.assertions.items()
+            "global_assertions": [
+                assertion.model_dump(mode="json")
+                for assertion in self.config.global_assertions
+            ],
+            "assertion_profiles": {
+                profile_id: profile.model_dump(mode="json")
+                for profile_id, profile in self.config.assertion_profiles.items()
             },
         }
 

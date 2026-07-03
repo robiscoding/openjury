@@ -47,9 +47,7 @@ CONTESTED_THRESHOLD = 0.6
 def demo_result() -> AgentEvalResult:
     """Canned result illustrating AgentEvalResult fields (no LLM calls)."""
     config = JuryConfig.from_json_file(str(HERE / "config.json"))
-    assertion_results = evaluate_assertions(
-        AGENT_TEXT, config.assertions["default"].checks
-    )
+    assertion_results = evaluate_assertions(AGENT_TEXT, config.global_assertions)
     assertion_score, assertions_passed = score_assertions(assertion_results)
     juror_scores = [
         JurorScore(
@@ -215,9 +213,7 @@ def print_extended_stats(result: AgentEvalResult) -> None:
     if result.evaluation_duration_ms is not None:
         print(f"  evaluation_duration_ms:   {result.evaluation_duration_ms}")
     if result.fetch_metadata is not None and result.fetch_metadata.total_latency_ms:
-        print(
-            "  agent_latency_ms:         " f"{result.fetch_metadata.total_latency_ms}"
-        )
+        print(f"  agent_latency_ms:         {result.fetch_metadata.total_latency_ms}")
     if result.juror_failures:
         print(f"  juror_failures:           {len(result.juror_failures)}")
         for failure in result.juror_failures:

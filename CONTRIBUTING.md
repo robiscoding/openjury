@@ -33,7 +33,7 @@ make install-dev
 ### Daily workflow
 
 ```bash
-make format    # Black + isort
+make format    # Ruff format + import fixes
 make lint      # format check
 make test      # pytest
 make check     # lint + test (CI gate)

@@ -25,7 +25,10 @@ CSV rows with named columns.
 
 ```json
 {
-  "assertions": {
+  "global_assertions": [
+    {"name": "not empty", "type": "min_length", "value": 1}
+  ],
+  "assertion_profiles": {
     "brief_answer": {
       "checks": [
         {"name": "under 300 characters", "type": "max_length", "value": 300}
@@ -38,15 +41,15 @@ CSV rows with named columns.
       "id": "case-1",
       "input": "Explain REST in one sentence.",
       "ground_truth": "REST is an architectural style for networked systems.",
-      "assertion_ids": ["brief_answer"]
+      "assertion_profile_ids": ["brief_answer"]
     }
   ]
 }
 ```
 
-`id` and `input` are required. `ground_truth` and `assertion_ids`
-are optional. IDs must be unique, and assertion references are validated when
-the config loads.
+`id` and `input` are required. `ground_truth`, `assertion_profile_ids`,
+`variables`, and inline `assertions` are optional. IDs must be unique, and
+profile references are validated when the config loads.
 
 ### JSONL (recommended)
 
@@ -58,8 +61,9 @@ Each non-empty line is one JSON object:
 | `prompt` | yes | Prompt sent to the agent and evaluated |
 | `endpoints` | no | List of endpoint specs. The **first** entry is used. If omitted, a global `--endpoints-config` must be supplied at run time |
 | `exemplars` | no | Calibration examples + per-case rules (see below) |
-| `assertion_ids` | no | IDs of policies in the config's top-level `assertions` registry |
-| `assertions` | no | Legacy inline deterministic checks; prefer `assertion_ids` |
+| `assertion_profile_ids` | no | IDs of profiles in the config's `assertion_profiles` registry |
+| `assertions` | no | Inline deterministic checks supplementing globals and profiles |
+| `variables` | no | Template values for `{{key}}` substitution in profile assertions |
 | `metadata` | no | Arbitrary JSON for your bookkeeping (not sent to jurors) |
 
 **`exemplars` object** (all parts optional):
@@ -78,8 +82,8 @@ Exemplars are turned into calibration text injected into the juror evaluation pr
 
 Header row must include `case_id`, `prompt`, `endpoints_json`.
 
-Optional columns: `ground_truth`, `assertion_ids_json`,
-`exemplars_json`, `metadata_json`. Legacy files may also use `assertion_id`,
+Optional columns: `ground_truth`, `assertion_profile_ids_json`, `variables_json`,
+`exemplars_json`, `metadata_json`. Legacy files may also use `assertion_profile_id`,
 `assertions_json`,
 `assertion_threshold`, and `quality_threshold`.
 

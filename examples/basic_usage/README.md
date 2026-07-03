@@ -80,11 +80,12 @@ More real-world setups (OpenRouter, mixed providers, Ollama, etc.): [`../provide
 | `jurors[].weight` | `1.0` | Relative influence in `weighted_mean`; higher = more authoritative juror |
 | `criteria[].weight` | `1.0` | Relative importance in composite score |
 | `assertions` | `{}` | Named assertion-policy registry referenced by dataset rows |
-| `dataset` | `[]` | Inline JSON rows with required `id`/`input` and optional `ground_truth`, `assertion_ids` |
+| `dataset` | `[]` | Inline JSON rows with required `id`/`input` and optional `ground_truth`, `assertion_profile_ids`, `variables`, inline `assertions` |
 
 JSON represents a CSV-style dataset as an array of row objects. Put reusable
 contracts in the top-level `assertions` object, then select any number from a
-row with `assertion_ids`. Assertions do not alter `composite_score`; inspect
+row with `assertion_profile_ids`. Global assertions apply to every row automatically.
+Assertions do not alter `composite_score`; inspect
 `result.assertion_results` for their outcomes. See the
 [`assertions` example](../assertions/) for all supported types.
 

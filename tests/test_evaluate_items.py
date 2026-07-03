@@ -147,7 +147,7 @@ def test_evaluate_items_populates_item_context_fields(
 ) -> None:
     mock_fetch.return_value = _fetch_result("ok")
     _make_juror_mocks(mock_juror_class)
-    sample_jury_config.quality_threshold = 4.0
+    sample_jury_config.assertion_policy.quality_threshold = 4.0
 
     jury = OpenJury(sample_jury_config)
     results = jury.evaluate_items(

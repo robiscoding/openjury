@@ -30,11 +30,22 @@ response locally.
 String and regex assertions accept `"case_sensitive": false`. It defaults to
 `true`.
 
-Assertions live in a top-level registry. Each named policy groups one or more
-checks with their thresholds:
+Assertions are configured in three layers:
+
+1. **`global_assertions`** — applied automatically to every item
+2. **`assertion_profiles`** — reusable contracts selected via `assertion_profile_ids`
+3. **`dataset[].assertions`** — optional inline supplements per row
 
 ```json
-"assertions": {
+"global_assertions": [
+  {
+    "name": "not empty",
+    "type": "min_length",
+    "value": 1,
+    "required": true
+  }
+],
+"assertion_profiles": {
   "booking_contract": {
     "checks": [
       {
@@ -51,7 +62,7 @@ checks with their thresholds:
 }
 ```
 
-Dataset rows reference a policy by ID:
+Dataset rows reference profiles by ID and may supply template variables:
 
 ```json
 "dataset": [
@@ -59,15 +70,22 @@ Dataset rows reference a policy by ID:
     "id": "booking-001",
     "input": "Book the morning flight to Boston.",
     "ground_truth": "The booking should include a confirmation number.",
-    "assertion_ids": ["booking_contract"]
+    "assertion_profile_ids": ["booking_contract"]
   }
 ]
 ```
 
-`required` defaults to `true`; `weight` defaults to `1.0`. Policy IDs and
-dataset item IDs are free-form strings, but dataset IDs must be unique and each
-entry in `assertion_ids` must match a registry key. Checks from multiple
-policies are combined; the highest (strictest) threshold wins.
+Use `{{key}}` in profile assertion values when item-specific substitution is needed:
+
+```json
+"variables": {"order_number": "12345"},
+"assertion_profile_ids": ["order_status_contract"]
+```
+
+`required` defaults to `true`; `weight` defaults to `1.0`. Profile IDs and dataset
+item IDs are free-form strings, but dataset IDs must be unique and each profile
+reference must match a registry key. Threshold precedence: item override →
+single selected profile → `assertion_policy` defaults.
 
 ## Reading results
 

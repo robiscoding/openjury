@@ -24,20 +24,21 @@ Practical guide for AI coding agents working in this repository. **Repo-specific
 | LLM | `langchain-openai`; optional `langchain-anthropic` (`openjury[anthropic]`) |
 | CLI | Typer + Rich |
 | Tests | pytest (`tests/`), optional pytest-cov |
-| Format / imports | Black (88 cols), isort (black profile) |
+| Format / imports | Ruff format + isort rules (`I`) |
+| Unused variables | Ruff F841 in `make lint` |
 | Types | mypy in `[project.optional-dependencies] dev` — **not** run by `make lint` |
 
 ---
 
 ## Architecture
 
-- **Configuration layer:** `JuryConfig`, `DatasetItemConfig`, `AssertionPolicyConfig`, `AssertionConfig`, `JurorConfig`, `LLMProviderConfig`, `CriterionConfig`, `AgentResponse`, and related enums live in `src/openjury/config.py`. Loaded via `JuryConfig.from_json_file` / `from_dict` / `from_json`. LLM credentials travel with the config, not from env vars.
+- **Configuration layer:** `JuryConfig`, `DatasetItemConfig`, `AssertionProfileConfig`, `AssertionPolicyDefaults`, `AssertionConfig`, `JurorConfig`, `LLMProviderConfig`, `CriterionConfig`, `AgentResponse`, and related enums live in `src/openjury/config.py`. Loaded via `JuryConfig.from_json_file` / `from_dict` / `from_json`. LLM credentials travel with the config, not from env vars.
 - **Provider resolution:** `resolve_juror_llm_config(juror, jury_llm_provider)` in `config.py` — jurors either inherit the jury-level `llm_provider` or fully override it by setting `model_name + api_key + provider` together on `JurorConfig`. Partial overrides are rejected at validation time.
 - **Endpoint fetching:** `endpoint_fetcher.py` — `fetch_agent_response()`, `AgentEndpoint`, SSE streaming with limits/metadata, `${VAR}` env interpolation, `{prompt}`/`{ground_truth}` template substitution. Called inside `evaluate()` before juror scoring.
 - **Execution:** `OpenJury` (`jury_engine.py`) constructs `Juror` instances. Public methods: `evaluate()`, `score_existing_response()`, `evaluate_items()`, `run_jurors()`, `score_batch()`. Juror concurrency via `ExecutionOptions.max_juror_workers`; item concurrency via `max_item_workers`. Outbound calls share `ExecutionOptions.outbound_slot()` semaphore.
 - **LLM boundary:** `Juror` builds prompts via `PromptTemplate` (`prompt_templates.py`), invokes the appropriate LLM (`ChatOpenAI` or `ChatAnthropic`), parses JSON (with regex fallback) into per-criterion scores + explanations (`juror.py`).
 - **Scoring:** `ScoreAggregator.compute_all` (`scoring.py`) produces `ScoredMetrics` — `weighted_mean`, `mean`, `median`, `harmonic_mean`, `weakest_link`, `juror_agreement`, optional `custom`. All values are on the `score_scale` axis.
-- **Inline datasets and assertions:** `JuryConfig.dataset` is an array of JSON row objects (`id`, `input`, optional `ground_truth` and `assertion_ids`). `JuryConfig.assertions` is a registry of reusable `AssertionPolicyConfig` objects keyed by ID. Dataset references are validated at config load time. `assertions.py` evaluates checks and computes their weighted pass rate; assertions never alter `composite_score`.
+- **Inline datasets and assertions:** `JuryConfig.dataset` is an array of JSON row objects (`id`, `input`, optional `ground_truth`, `assertion_profile_ids`, `variables`, inline `assertions`). `JuryConfig.global_assertions` applies to every item; `JuryConfig.assertion_profiles` holds reusable `AssertionProfileConfig` objects keyed by ID. Resolution via `assertion_resolution.resolve_item_assertions()`. `assertions.py` evaluates checks and computes their weighted pass rate; assertions never alter `composite_score`.
 - **Consistency audit:** When `num_trials > 1`, `evaluate()` reruns the agent N times and calls `ScoreAggregator.compute_consistency` to produce a `ConsistencyResult` (std, mean, min, max, interpretation). Quality score always comes from trial 1.
 - **Output:** `AgentEvalResult` / `CriterionEvaluation` / `TrialResult` in `output_format.py`. `ResultFormatter.format_result(result)` produces human-readable text. `OpenJury.format_result(result)` is a static alias.
 - **CLI:** `src/openjury/cli.py` — Typer app `cli_app`; tests invoke `python -m openjury.cli`.
@@ -78,7 +79,7 @@ Practical guide for AI coding agents working in this repository. **Repo-specific
 
 ## Coding Standards
 
-- **Style:** Black line length **88**, target py311; isort profile **black**. Lint scope: `src/`, `tests/`, `examples/` (`Makefile`).
+- **Style:** Ruff format (88 cols, py311) and isort-compatible import rules (`I`); Ruff **F841** (unused local variables). Lint scope: `src/`, `tests/`, `examples/` (`Makefile`).
 - **Typing:** `disallow_untyped_defs = true` in `pyproject.toml` tool.mypy — new code should remain type-annotated where the rest of the module is.
 - **Models:** Prefer Pydantic `BaseModel` + `Field(...)` with descriptions (matches existing config/output models).
 - **Logging:** Module-level `logger = logging.getLogger(__name__)` pattern (`logger.py` defines optional `setup_logger`; core modules use standard logging).
@@ -93,9 +94,9 @@ Practical guide for AI coding agents working in this repository. **Repo-specific
 - **Custom scoring:** Register a `ScoringFunction` (i.e. `Callable[[List[JurorScore], List[CriterionConfig]], float]`) via `ScoreAggregator.register(name, fn)`. Reference by name in `JuryConfig.custom_scoring_function`. Produces `ScoredMetrics.custom`.
 - **Per-juror provider override:** Set `model_name`, `api_key`, and `provider` **all together** on `JurorConfig` to override the jury-level `llm_provider`. Setting any subset raises `ValidationError` at config construction time.
 - **Evaluation:** `OpenJury.evaluate(prompt, endpoint, options=...)` returns `AgentEvalResult`. `score_existing_response(prompt, agent_response, ...)` scores without fetching. `evaluate_items(items, endpoint, options=...)` runs bounded batch evaluation. `score_batch(prompts, endpoint)` is sequential fail-fast over `evaluate_items`. `score_response()` is an alias for `evaluate()`.
-- **Inline dataset:** JSON represents CSV-style data as an array of row objects under `dataset`. Every row requires unique non-empty `id` and `input`; `ground_truth` is an optional string, and `assertion_ids` is an optional list of policy IDs. Dataset items do not select agents or endpoints. `batch-eval` uses this dataset when `--input` is omitted. External JSONL/CSV datasets remain supported.
-- **Assertion registry:** `JuryConfig.assertions` is an object keyed by stable policy IDs. Each value has non-empty `checks: List[AssertionConfig]` plus optional `assertion_threshold` and `quality_threshold`. A dataset row may select multiple policies through `assertion_ids`; checks are concatenated and the highest configured assertion/quality thresholds win. Unknown or duplicate references fail validation.
-- **Legacy/default assertions:** A legacy top-level assertion list is normalized to `assertions.default.checks`. Direct API calls with `assertions=None` use only a policy literally named `default`; `assertions=[]` disables it; an explicit list replaces it.
+- **Inline dataset:** JSON represents CSV-style data as an array of row objects under `dataset`. Every row requires unique non-empty `id` and `input`; `ground_truth`, `assertion_profile_ids`, `variables`, and inline `assertions` are optional. Dataset items do not select agents or endpoints. `batch-eval` uses this dataset when `--input` is omitted. External JSONL/CSV datasets remain supported.
+- **Assertion layers:** `global_assertions` apply to every item. `assertion_profiles` are selected per row via `assertion_profile_ids`. Inline `dataset[].assertions` supplement both. Threshold precedence: item override → single selected profile → `assertion_policy` defaults. Multiple profiles with profile-level thresholds are rejected at config load.
+- **Direct API assertions:** `evaluate(assertions=None)` uses `global_assertions` only. An explicit list supplements globals; `assertions=[]` means globals only.
 - **Assertion policy:** `assertion_score` is `sum(weight for passed assertions) / sum(all assertion weights)`. `assertions_passed` means every assertion with `required=True` passed. With no assertions, these values are `1.0` and `True`. `assertion_threshold` is on the 0–1 axis; `quality_threshold` is on the `score_scale` axis and cannot exceed it.
 - **Overall status:** `AgentEvalResult.passed` is true only when all required assertions pass, the optional assertion threshold is met, and the optional quality threshold is met. Neither threshold changes `composite_score`.
 - **Consistency audit:** Set `num_trials > 1` in `JuryConfig`. `AgentEvalResult.consistency_result` is populated with `ConsistencyResult`; `trial_results` contains all `TrialResult` objects.
@@ -140,8 +141,8 @@ See `examples/provider_configs/` for ready-to-use configs for OpenAI, OpenRouter
 | Command | Purpose |
 |---------|---------|
 | `make install-dev` | Editable install + dev extras via uv |
-| `make format` | Black + isort write |
-| `make lint` | Black --check + isort --check-only |
+| `make format` | `ruff format` + `ruff check --fix` |
+| `make lint` | `ruff format --check` + `ruff check` |
 | `make test` | `pytest tests/ -v` |
 | `make test-cov` | Pytest with coverage HTML + terminal |
 | `make check` | lint + test |
@@ -180,7 +181,7 @@ See `examples/provider_configs/` for ready-to-use configs for OpenAI, OpenRouter
 - **Juror JSON shape:** Model responses must include scores for **every** criterion name after parsing; otherwise `Juror.evaluate` retries then raises `JurorException`.
 - **Score axes stay separate:** `composite_score` is subjective juror quality on the configured `score_scale`; `assertion_score` is a deterministic weighted pass rate on 0–1. Do not blend assertions into `composite_score`.
 - **Assertion defaults:** Assertions default to `required=True`, `weight=1.0`, and `case_sensitive=True`. A failed optional assertion lowers `assertion_score` but does not make `assertions_passed` false. A failed required assertion makes `assertions_passed` and overall `passed` false even when the weighted threshold is met.
-- **Case ownership:** Prompt-specific contracts live in named top-level assertion policies and are selected by `dataset[].assertion_ids`. Do not mutate shared engine/config state between cases. A policy named `default` is reserved for backward-compatible direct-call defaults.
+- **Case ownership:** Prompt-specific contracts live in `assertion_profiles` and are selected by `dataset[].assertion_profile_ids`. Do not mutate shared engine/config state between cases.
 - **Parallel mode:** Failed jurors are **skipped** (logged); evaluation proceeds if at least one succeeds. Serial path also skips-and-continues (both paths use try/except in `run_jurors`). An all-juror failure raises `OpenJuryEvaluationError` (or returns partial `ScoringResult` when `raise_if_all_jurors_failed=False`).
 - **`parallel_execution`** is deprecated on `OpenJury` — prefer `ExecutionOptions(max_juror_workers=1)` for serial jurors. Still accepted with `DeprecationWarning`.
 - **Console script:** `pyproject.toml` declares `openjury = "openjury.cli:app"` but `cli.py` defines **`cli_app`**, not `app` — installing the console script may fail until aligned.
@@ -266,7 +267,7 @@ See `examples/provider_configs/` for ready-to-use configs for OpenAI, OpenRouter
 - [ ] **Score-axis confusion** between 0–1 `assertion_threshold` and 1–`score_scale` `quality_threshold`.
 - [ ] **Required assertion masking** if overall `passed` checks only the weighted threshold and omits `assertions_passed`.
 - [ ] **Assertion scope leakage** if one case's contract is stored on shared `JuryConfig` or mutable engine state and applied to unrelated responses.
-- [ ] **Dangling dataset references** if an entry in `dataset[].assertion_ids` does not match a key in the top-level assertion registry.
+- [ ] **Dangling dataset references** if an entry in `dataset[].assertion_profile_ids` does not match a key in `assertion_profiles`.
 - [ ] **Custom scoring** registration collisions on `ScoreAggregator._custom_functions` class state across tests — call `ScoreAggregator.unregister(name)` in test teardown.
 - [ ] **Silent juror failures** in parallel mode masking systemic prompt/API breakage.
 - [ ] **LangChain / OpenAI** argument renames (`model_name` vs `model`) when upgrading dependencies.
@@ -276,7 +277,7 @@ See `examples/provider_configs/` for ready-to-use configs for OpenAI, OpenRouter
 
 ## Suggested Additional `.cursor/rules/*.mdc` Files
 
-- **`openjury-python.mdc`** — Python 3.11+, Pydantic v2 patterns used here (`Field`, enums, `model_validator`), Black/isort, src-layout imports.
+- **`openjury-python.mdc`** — Python 3.11+, Pydantic v2 patterns used here (`Field`, enums, `model_validator`), Ruff format/lint, src-layout imports.
 - **`openjury-domain.mdc`** — Domain vocabulary: juror, criterion, `AgentResponse`, `LLMProviderConfig`, `JurorProvider`, `ScoreAggregator`, `AgentEvalResult`, `ConsistencyResult`, `num_trials`.
 - **`openjury-cli-caveats.mdc`** — Document known CLI/entry-point drift so agents don't "fix" tests without fixing `cli_app`/`app` and stale `Verdict` attribute references together.
 

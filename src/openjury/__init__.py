@@ -1,5 +1,6 @@
 from typing import Any
 
+from openjury.assertion_resolution import resolve_item_assertions
 from openjury.assertions import evaluate_assertions, score_assertions
 from openjury.batch_summary import (
     BatchEvalResult,
@@ -14,7 +15,8 @@ from openjury.batch_summary import (
 from openjury.config import (
     AgentResponse,
     AssertionConfig,
-    AssertionPolicyConfig,
+    AssertionPolicyDefaults,
+    AssertionProfileConfig,
     AssertionType,
     CriterionConfig,
     DatasetItemConfig,
@@ -86,9 +88,11 @@ __all__ = [
     "LLMProviderConfig",
     "CriterionConfig",
     "AssertionConfig",
-    "AssertionPolicyConfig",
+    "AssertionProfileConfig",
+    "AssertionPolicyDefaults",
     "DatasetItemConfig",
     "AssertionType",
+    "resolve_item_assertions",
     "evaluate_assertions",
     "score_assertions",
     "AgentResponse",

@@ -48,7 +48,6 @@ def test_load_cases_jsonl(tmp_path: Path):
     assert cases[0].exemplars is not None
     assert cases[0].exemplars.rules == "Be fair"
     assert cases[0].endpoints[0].alias == "test-ep"
-    assert cases[0].assertions is not None
     assert cases[0].assertions[0].name == "greets"
     assert cases[0].assertion_threshold == 0.8
     assert cases[0].quality_threshold == 4.0
@@ -88,7 +87,6 @@ def test_load_cases_csv_with_assertion_policy(tmp_path: Path):
 
     case = load_cases(p)[0]
 
-    assert case.assertions is not None
     assert case.assertions[0].name == "brief"
     assert case.assertion_threshold == 0.9
     assert case.quality_threshold == 3.5
@@ -124,7 +122,10 @@ def test_resolve_endpoint_selects_first_endpoint():
 
 def test_cases_from_inline_config(sample_jury_config):
     data = sample_jury_config.model_dump()
-    data["assertions"] = {
+    data["global_assertions"] = [
+        {"name": "global", "type": "contains", "value": "summary"}
+    ]
+    data["assertion_profiles"] = {
         "brief": {
             "checks": [{"name": "brief", "type": "max_length", "value": 100}],
             "assertion_threshold": 1.0,
@@ -135,7 +136,7 @@ def test_cases_from_inline_config(sample_jury_config):
             "id": "inline-1",
             "input": "Summarize this",
             "ground_truth": "A short summary",
-            "assertion_ids": ["brief"],
+            "assertion_profile_ids": ["brief"],
         }
     ]
     config = JuryConfig.model_validate(data)
@@ -145,22 +146,24 @@ def test_cases_from_inline_config(sample_jury_config):
     assert case.case_id == "inline-1"
     assert case.prompt == "Summarize this"
     assert case.ground_truth == "A short summary"
-    assert case.assertion_ids == ["brief"]
+    assert case.assertion_profile_ids == ["brief"]
     checks, assertion_threshold, _ = assertion_policy_for_case(case, config)
-    assert checks[0].name == "brief"
+    assert [check.name for check in checks] == ["global", "brief"]
     assert assertion_threshold == 1.0
 
 
-def test_external_case_resolves_config_assertion_id(sample_jury_config):
+def test_external_case_resolves_config_assertion_profile(sample_jury_config):
     data = sample_jury_config.model_dump()
-    data["assertions"] = {
+    data["assertion_profiles"] = {
         "cited": {
             "checks": [{"name": "citation", "type": "contains", "value": "https://"}],
             "quality_threshold": 4.0,
         }
     }
     config = JuryConfig.model_validate(data)
-    case = BatchCase(case_id="external-1", prompt="Research", assertion_ids=["cited"])
+    case = BatchCase(
+        case_id="external-1", prompt="Research", assertion_profile_ids=["cited"]
+    )
 
     checks, assertion_threshold, quality_threshold = assertion_policy_for_case(
         case, config
@@ -171,24 +174,23 @@ def test_external_case_resolves_config_assertion_id(sample_jury_config):
     assert quality_threshold == 4.0
 
 
-def test_case_combines_multiple_assertion_policies(sample_jury_config):
+def test_case_combines_multiple_assertion_profiles_without_thresholds(
+    sample_jury_config,
+):
     data = sample_jury_config.model_dump()
-    data["assertions"] = {
+    data["assertion_profiles"] = {
         "cited": {
             "checks": [{"name": "citation", "type": "contains", "value": "https://"}],
-            "assertion_threshold": 0.8,
         },
         "brief": {
             "checks": [{"name": "brief", "type": "max_length", "value": 500}],
-            "assertion_threshold": 1.0,
-            "quality_threshold": 4.0,
         },
     }
     config = JuryConfig.model_validate(data)
     case = BatchCase(
         case_id="external-1",
         prompt="Research",
-        assertion_ids=["cited", "brief"],
+        assertion_profile_ids=["cited", "brief"],
     )
 
     checks, assertion_threshold, quality_threshold = assertion_policy_for_case(
@@ -196,8 +198,31 @@ def test_case_combines_multiple_assertion_policies(sample_jury_config):
     )
 
     assert [check.name for check in checks] == ["citation", "brief"]
-    assert assertion_threshold == 1.0
-    assert quality_threshold == 4.0
+    assert assertion_threshold is None
+    assert quality_threshold is None
+
+
+def test_case_rejects_multiple_profiles_with_thresholds(sample_jury_config):
+    data = sample_jury_config.model_dump()
+    data["assertion_profiles"] = {
+        "cited": {
+            "checks": [{"name": "citation", "type": "contains", "value": "https://"}],
+            "assertion_threshold": 0.8,
+        },
+        "brief": {
+            "checks": [{"name": "brief", "type": "max_length", "value": 500}],
+            "quality_threshold": 4.0,
+        },
+    }
+    config = JuryConfig.model_validate(data)
+    case = BatchCase(
+        case_id="external-1",
+        prompt="Research",
+        assertion_profile_ids=["cited", "brief"],
+    )
+
+    with pytest.raises(ValueError, match="define thresholds"):
+        assertion_policy_for_case(case, config)
 
 
 def test_format_exemplars_for_jury_splits_rules():

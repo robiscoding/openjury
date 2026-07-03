@@ -174,7 +174,7 @@ class TestJuryConfig:
         config = JuryConfig.model_validate(sample_jury_config.model_dump())
         assert config.score_min == 0
 
-    def test_inline_dataset_references_assertion_policy(
+    def test_inline_dataset_references_assertion_profile(
         self, sample_criteria, sample_jurors, sample_llm_provider
     ):
         config = JuryConfig(
@@ -182,7 +182,7 @@ class TestJuryConfig:
             llm_provider=sample_llm_provider,
             criteria=sample_criteria,
             jurors=sample_jurors,
-            assertions={
+            assertion_profiles={
                 "citation_contract": {
                     "checks": [
                         {
@@ -200,18 +200,21 @@ class TestJuryConfig:
                     "id": "case-1",
                     "input": "Answer with a source",
                     "ground_truth": "A sourced answer",
-                    "assertion_ids": ["citation_contract"],
+                    "assertion_profile_ids": ["citation_contract"],
                 }
             ],
         )
 
         assert config.dataset[0].input == "Answer with a source"
-        assert config.assertions["citation_contract"].checks[0].name == "has citation"
+        assert (
+            config.assertion_profiles["citation_contract"].checks[0].name
+            == "has citation"
+        )
 
-    def test_dataset_rejects_unknown_assertion_id(
+    def test_dataset_rejects_unknown_assertion_profile_id(
         self, sample_criteria, sample_jurors, sample_llm_provider
     ):
-        with pytest.raises(ValidationError, match="unknown assertion_id"):
+        with pytest.raises(ValidationError, match="unknown assertion_profile_ids"):
             JuryConfig(
                 name="Dataset jury",
                 llm_provider=sample_llm_provider,
@@ -221,7 +224,7 @@ class TestJuryConfig:
                     {
                         "id": "case-1",
                         "input": "Hello",
-                        "assertion_ids": ["missing"],
+                        "assertion_profile_ids": ["missing"],
                     }
                 ],
             )
@@ -241,7 +244,7 @@ class TestJuryConfig:
                 ],
             )
 
-    def test_dataset_item_accepts_legacy_singular_assertion_id(
+    def test_dataset_item_accepts_legacy_singular_assertion_profile_id(
         self, sample_criteria, sample_jurors, sample_llm_provider
     ):
         config = JuryConfig(
@@ -249,7 +252,7 @@ class TestJuryConfig:
             llm_provider=sample_llm_provider,
             criteria=sample_criteria,
             jurors=sample_jurors,
-            assertions={
+            assertion_profiles={
                 "contract": {
                     "checks": [{"name": "ok", "type": "contains", "value": "ok"}]
                 }
@@ -258,14 +261,14 @@ class TestJuryConfig:
                 {
                     "id": "case-1",
                     "input": "Hello",
-                    "assertion_id": "contract",
+                    "assertion_profile_id": "contract",
                 }
             ],
         )
 
-        assert config.dataset[0].assertion_ids == ["contract"]
+        assert config.dataset[0].assertion_profile_ids == ["contract"]
 
-    def test_dataset_item_rejects_duplicate_assertion_ids(
+    def test_dataset_item_rejects_duplicate_assertion_profile_ids(
         self, sample_criteria, sample_jurors, sample_llm_provider
     ):
         with pytest.raises(ValidationError, match="cannot contain duplicates"):
@@ -274,7 +277,7 @@ class TestJuryConfig:
                 llm_provider=sample_llm_provider,
                 criteria=sample_criteria,
                 jurors=sample_jurors,
-                assertions={
+                assertion_profiles={
                     "contract": {
                         "checks": [{"name": "ok", "type": "contains", "value": "ok"}]
                     }
@@ -283,20 +286,53 @@ class TestJuryConfig:
                     {
                         "id": "case-1",
                         "input": "Hello",
-                        "assertion_ids": ["contract", "contract"],
+                        "assertion_profile_ids": ["contract", "contract"],
                     }
                 ],
             )
 
-    def test_legacy_assertion_list_becomes_default_policy(
+    def test_rejects_default_assertion_profile_id(
         self, sample_criteria, sample_jurors, sample_llm_provider
     ):
-        config = JuryConfig(
-            name="Legacy",
-            llm_provider=sample_llm_provider,
-            criteria=sample_criteria,
-            jurors=sample_jurors,
-            assertions=[{"name": "legacy", "type": "contains", "value": "ok"}],
-        )
+        with pytest.raises(
+            ValidationError, match="cannot include a profile named 'default'"
+        ):
+            JuryConfig(
+                name="Dataset jury",
+                llm_provider=sample_llm_provider,
+                criteria=sample_criteria,
+                jurors=sample_jurors,
+                assertion_profiles={
+                    "default": {
+                        "checks": [{"name": "ok", "type": "contains", "value": "ok"}]
+                    }
+                },
+            )
 
-        assert config.assertions["default"].checks[0].name == "legacy"
+    def test_rejects_multiple_profiles_with_thresholds_on_dataset_item(
+        self, sample_criteria, sample_jurors, sample_llm_provider
+    ):
+        with pytest.raises(ValidationError, match="define thresholds"):
+            JuryConfig(
+                name="Dataset jury",
+                llm_provider=sample_llm_provider,
+                criteria=sample_criteria,
+                jurors=sample_jurors,
+                assertion_profiles={
+                    "a": {
+                        "checks": [{"name": "a", "type": "contains", "value": "a"}],
+                        "assertion_threshold": 0.8,
+                    },
+                    "b": {
+                        "checks": [{"name": "b", "type": "contains", "value": "b"}],
+                        "quality_threshold": 4.0,
+                    },
+                },
+                dataset=[
+                    {
+                        "id": "case-1",
+                        "input": "Hello",
+                        "assertion_profile_ids": ["a", "b"],
+                    }
+                ],
+            )

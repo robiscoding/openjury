@@ -18,72 +18,65 @@
       "description": "Is the response helpful?"
     }
   ],
-  "assertions": {
+  "assertion_profiles": {
     "order_status_contract": {
       "checks": [
-    {
-      "name": "contains order number",
-      "type": "contains",
-      "value": "order #12345"
-    },
-    {
-      "name": "does not contain an error",
-      "type": "not_contains",
-      "value": "internal server error",
-      "case_sensitive": false
-    },
-    {
-      "name": "equals the canonical response",
-      "type": "equals",
-      "value": "Status: shipped. Your order #12345 will arrive Friday. Track it at https://example.com/orders/12345"
-    },
-    {
-      "name": "does not equal a refusal",
-      "type": "not_equals",
-      "value": "I cannot help with that."
-    },
-    {
-      "name": "starts with a status",
-      "type": "starts_with",
-      "value": "Status:"
-    },
-    {
-      "name": "ends with the order path",
-      "type": "ends_with",
-      "value": "/orders/12345"
-    },
-    {
-      "name": "mentions a delivery state",
-      "type": "contains_any",
-      "value": [
-        "shipped",
-        "delivered",
-        "delayed"
-      ]
-    },
-    {
-      "name": "includes tracking instructions",
-      "type": "contains_all",
-      "value": [
-        "Track it",
-        "https://"
-      ]
-    },
-    {
-      "name": "contains a five-digit order number",
-      "type": "regex",
-      "value": "order #[0-9]{5}"
-    },
-    {
-      "name": "has enough detail",
-      "type": "min_length",
-      "value": 40
-    },
-    {
-      "name": "stays concise",
-      "type": "max_length",
-      "value": 160
-    }
+        {
+          "name": "contains order number",
+          "type": "contains",
+          "value": "order #{{order_number}}"
+        },
+        {
+          "name": "does not contain an error",
+          "type": "not_contains",
+          "value": "internal server error",
+          "case_sensitive": false
+        },
+        {
+          "name": "equals the canonical response",
+          "type": "equals",
+          "value": "Status: shipped. Your order #12345 will arrive Friday. Track it at https://example.com/orders/12345"
+        },
+        {
+          "name": "does not equal a refusal",
+          "type": "not_equals",
+          "value": "I cannot help with that."
+        },
+        {
+          "name": "starts with a status",
+          "type": "starts_with",
+          "value": "Status:"
+        },
+        {
+          "name": "ends with the order path",
+          "type": "ends_with",
+          "value": "{{order_path}}"
+        },
+        {
+          "name": "mentions a delivery state",
+          "type": "contains_any",
+          "value": ["shipped", "delivered", "delayed"]
+        },
+        {
+          "name": "includes tracking instructions",
+          "type": "contains_all",
+          "value": ["Track it", "https://"]
+        },
+        {
+          "name": "contains a five-digit order number",
+          "type": "regex",
+          "value": "order #[0-9]{5}"
+        },
+        {
+          "name": "has enough detail",
+          "type": "min_length",
+          "value": 40
+        },
+        {
+          "name": "stays concise",
+          "type": "max_length",
+          "value": 160
+        }
       ]
     }
   },
@@ -92,7 +85,11 @@
       "id": "order-status-001",
       "input": "Where is order #12345?",
       "ground_truth": "Status: shipped. Your order #12345 will arrive Friday.",
-      "assertion_ids": ["order_status_contract"]
+      "variables": {
+        "order_number": "12345",
+        "order_path": "/orders/12345"
+      },
+      "assertion_profile_ids": ["order_status_contract"]
     }
   ]
 }
