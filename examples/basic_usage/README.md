@@ -56,19 +56,6 @@ prompt → your agent endpoint → response text
       }
     }
   ],
-  "assertions": [
-    {
-      "name": "no internal error",
-      "type": "not_contains",
-      "value": "Internal Server Error",
-      "case_sensitive": false
-    },
-    {
-      "name": "concise response",
-      "type": "max_length",
-      "value": 2000
-    }
-  ],
   "jurors": [
     {
       "name": "Juror A",
@@ -91,10 +78,13 @@ More real-world setups (OpenRouter, mixed providers, Ollama, etc.): [`../provide
 | `criteria[].rubric` | `null` | Explicit score anchors per level. Strongly recommended — improves inter-juror reliability |
 | `jurors[].weight` | `1.0` | Relative influence in `weighted_mean`; higher = more authoritative juror |
 | `criteria[].weight` | `1.0` | Relative importance in composite score |
-| `assertions` | `[]` | Deterministic response checks reported separately from juror scores |
+| `assertions` | `{}` | Named assertion-policy registry referenced by dataset rows |
+| `dataset` | `[]` | Inline JSON rows with required `id`/`input` and optional `ground_truth`, `assertion_ids` |
 
-Assertions do not alter `composite_score`; inspect
-`result.assertion_results` for their pass/fail outcomes. See the
+JSON represents a CSV-style dataset as an array of row objects. Put reusable
+contracts in the top-level `assertions` object, then select any number from a
+row with `assertion_ids`. Assertions do not alter `composite_score`; inspect
+`result.assertion_results` for their outcomes. See the
 [`assertions` example](../assertions/) for all supported types.
 
 \*Required unless every juror sets `model_name`, `api_key`, and `provider` together.

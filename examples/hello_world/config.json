@@ -41,7 +41,9 @@
       }
     }
   ],
-  "assertions": [
+  "assertions": {
+    "default": {
+      "checks": [
     {
       "name": "mentions OpenJury",
       "type": "contains",
@@ -53,5 +55,7 @@
       "value": "Internal Server Error",
       "case_sensitive": false
     }
-  ]
+      ]
+    }
+  }
 }

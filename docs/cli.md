@@ -9,7 +9,7 @@ Alternative: `python -m openjury.cli`
 | Command | Description |
 |---------|-------------|
 | `run` | Evaluate prompt(s) against agent endpoint(s) |
-| `batch-eval` | Run JSONL/CSV dataset through a jury |
+| `batch-eval` | Run an inline config, JSONL, or CSV dataset through a jury |
 | `list-jurors` | Show jurors from a config or built-in criterion names |
 | `list-configs` | List example JSON configs or print sample structure |
 | `export-results` | Convert results JSONL to CSV/JSON summary |
@@ -55,6 +55,16 @@ openjury run \
 Total trials = 3 (trial 1 = quality; trials 2–3 measure consistency).
 
 ## batch-eval
+
+```bash
+openjury batch-eval \
+  --config jury_config.json \
+  --endpoints-config endpoints.json \
+  --output results.jsonl
+```
+
+When the config contains `dataset`, `--input` is optional. Supplying it
+overrides the inline dataset:
 
 ```bash
 openjury batch-eval \

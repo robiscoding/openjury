@@ -43,7 +43,9 @@ AGENT_TEXT = (
 def demo_result() -> AgentEvalResult:
     """Canned result illustrating AgentEvalResult fields (no LLM calls)."""
     config = JuryConfig.from_json_file(str(HERE / "config.json"))
-    assertion_results = evaluate_assertions(AGENT_TEXT, config.assertions)
+    assertion_results = evaluate_assertions(
+        AGENT_TEXT, config.assertions["default"].checks
+    )
     assertion_score, assertions_passed = score_assertions(assertion_results)
     juror_scores = [
         JurorScore(
