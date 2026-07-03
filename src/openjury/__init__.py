@@ -4,8 +4,10 @@ from openjury.assertions import evaluate_assertions, score_assertions
 from openjury.config import (
     AgentResponse,
     AssertionConfig,
+    AssertionPolicyConfig,
     AssertionType,
     CriterionConfig,
+    DatasetItemConfig,
     JurorConfig,
     JurorProvider,
     JuryConfig,
@@ -59,7 +61,7 @@ from openjury.scoring import (
     ScoringFunction,
 )
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"
 __all__ = [
     # Core engine
     "OpenJury",
@@ -71,6 +73,8 @@ __all__ = [
     "LLMProviderConfig",
     "CriterionConfig",
     "AssertionConfig",
+    "AssertionPolicyConfig",
+    "DatasetItemConfig",
     "AssertionType",
     "evaluate_assertions",
     "score_assertions",

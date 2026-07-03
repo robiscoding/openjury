@@ -5,6 +5,7 @@ import pytest
 from openjury import AgentResponse, OpenJury
 from openjury.config import (
     AssertionConfig,
+    AssertionPolicyConfig,
     CriterionConfig,
     JurorConfig,
     JurorProvider,
@@ -90,13 +91,17 @@ class TestScoreResponse:
     ):
         mock_resp = self._setup_mocks(mock_juror_class)
         mock_fetch.return_value = _fetch_result(mock_resp)
-        sample_jury_config.assertions = [
-            AssertionConfig(
-                name="mentions answer",
-                type="contains",
-                value="answer",
+        sample_jury_config.assertions = {
+            "default": AssertionPolicyConfig(
+                checks=[
+                    AssertionConfig(
+                        name="mentions answer",
+                        type="contains",
+                        value="answer",
+                    )
+                ]
             )
-        ]
+        }
 
         result = OpenJury(sample_jury_config).evaluate(
             prompt="Q?",
@@ -118,22 +123,26 @@ class TestScoreResponse:
             CriterionConfig(name="helpfulness", description="H"),
             CriterionConfig(name="accuracy", description="A"),
         ]
-        sample_jury_config.assertions = [
-            AssertionConfig(
-                name="confirmation number",
-                type="regex",
-                value=r"CONF-[0-9]+",
-                required=True,
-                weight=1.0,
-            ),
-            AssertionConfig(
-                name="mentions answer",
-                type="contains",
-                value="answer",
-                required=False,
-                weight=4.0,
-            ),
-        ]
+        sample_jury_config.assertions = {
+            "default": AssertionPolicyConfig(
+                checks=[
+                    AssertionConfig(
+                        name="confirmation number",
+                        type="regex",
+                        value=r"CONF-[0-9]+",
+                        required=True,
+                        weight=1.0,
+                    ),
+                    AssertionConfig(
+                        name="mentions answer",
+                        type="contains",
+                        value="answer",
+                        required=False,
+                        weight=4.0,
+                    ),
+                ]
+            )
+        }
         sample_jury_config.assertion_threshold = 0.8
         sample_jury_config.quality_threshold = 4.0
 
@@ -167,6 +176,65 @@ class TestScoreResponse:
         assert result.assertion_score == 1.0
         assert result.assertions_passed is True
         assert result.passed is False
+
+    def test_case_assertions_replace_jury_defaults(
+        self, mock_juror_class, mock_fetch, sample_jury_config
+    ):
+        mock_resp = self._setup_mocks(mock_juror_class)
+        mock_fetch.return_value = _fetch_result(mock_resp)
+        sample_jury_config.assertions = {
+            "default": AssertionPolicyConfig(
+                checks=[
+                    AssertionConfig(
+                        name="global check",
+                        type="contains",
+                        value="missing",
+                    )
+                ]
+            )
+        }
+
+        result = OpenJury(sample_jury_config).evaluate(
+            prompt="Q?",
+            endpoint=AgentEndpoint(url="http://localhost/v1"),
+            assertions=[
+                AssertionConfig(
+                    name="case check",
+                    type="contains",
+                    value="answer",
+                )
+            ],
+        )
+
+        assert [item.name for item in result.assertion_results] == ["case check"]
+        assert result.assertions_passed is True
+
+    def test_explicit_empty_case_assertions_disable_jury_defaults(
+        self, mock_juror_class, mock_fetch, sample_jury_config
+    ):
+        mock_resp = self._setup_mocks(mock_juror_class)
+        mock_fetch.return_value = _fetch_result(mock_resp)
+        sample_jury_config.assertions = {
+            "default": AssertionPolicyConfig(
+                checks=[
+                    AssertionConfig(
+                        name="global check",
+                        type="contains",
+                        value="missing",
+                    )
+                ]
+            )
+        }
+
+        result = OpenJury(sample_jury_config).evaluate(
+            prompt="Q?",
+            endpoint=AgentEndpoint(url="http://localhost/v1"),
+            assertions=[],
+        )
+
+        assert result.assertion_results == []
+        assert result.assertion_score == 1.0
+        assert result.assertions_passed is True
 
     def test_score_response_is_evaluate_alias(
         self, mock_juror_class, mock_fetch, sample_jury_config

@@ -220,6 +220,7 @@ class Juror:
         prompt: str,
         response: AgentResponse,
         criteria: List[CriterionConfig],
+        score_min: int = 1,
         score_scale: int = 5,
         max_retries: int = 1,
         evaluation_template: Optional[str] = None,
@@ -237,6 +238,7 @@ class Juror:
             response=response,
             criteria=criteria,
             custom_template=evaluation_template,
+            score_min=score_min,
             score_scale=score_scale,
             references=references,
             case_rules=case_rules,
@@ -259,6 +261,17 @@ class Juror:
                     raise JurorException(
                         f"Juror {self.name} missing scores for criteria: {missing}",
                         code=JurorErrorCode.JUROR_MISSING_CRITERIA,
+                    )
+                invalid_scores = {
+                    name: score
+                    for name, score in scores.items()
+                    if not score.is_integer() or not score_min <= score <= score_scale
+                }
+                if invalid_scores:
+                    raise JurorException(
+                        f"Juror {self.name} returned scores outside the integer "
+                        f"range {score_min}-{score_scale}: {invalid_scores}",
+                        code=JurorErrorCode.JUROR_PARSE_ERROR,
                     )
 
                 logger.debug(f"Juror {self.name} evaluation successful: {scores}")

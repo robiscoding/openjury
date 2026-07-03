@@ -9,6 +9,8 @@ from rich.table import Table
 
 from openjury.batch_dataset import (
     EndpointSpec,
+    assertion_policy_for_case,
+    cases_from_config,
     eval_record,
     format_exemplars_for_jury,
     load_cases,
@@ -21,6 +23,7 @@ from openjury.endpoint_fetcher import (
     fetch_all_responses,
     load_endpoints_file,
 )
+from openjury.execution import ExecutionOptions
 from openjury.jury_engine import OpenJury
 from openjury.output_format import (
     AgentEvalResult,
@@ -184,8 +187,11 @@ def batch_eval(
     config: Path = typer.Option(
         ..., "--config", "-c", help="Path to jury configuration JSON file"
     ),
-    input_path: Path = typer.Option(
-        ..., "--input", "-i", help="Dataset path (.jsonl or .csv)"
+    input_path: Optional[Path] = typer.Option(
+        None,
+        "--input",
+        "-i",
+        help="Dataset path (.jsonl or .csv); omit to use config.dataset",
     ),
     output_path: Path = typer.Option(..., "--output", "-o", help="Output JSONL path"),
     endpoints_config: Optional[Path] = typer.Option(
@@ -208,7 +214,7 @@ def batch_eval(
     if not config.exists():
         console.print(f"[red]Error: Config file {config} does not exist[/red]")
         raise typer.Exit(1)
-    if not input_path.exists():
+    if input_path is not None and not input_path.exists():
         console.print(f"[red]Error: Dataset {input_path} does not exist[/red]")
         raise typer.Exit(1)
 
@@ -231,7 +237,15 @@ def batch_eval(
     try:
         jury_config = JuryConfig.from_json_file(str(config))
         jury = OpenJury(jury_config)
-        cases = load_cases(input_path)
+        cases = (
+            load_cases(input_path)
+            if input_path is not None
+            else cases_from_config(jury_config)
+        )
+        if not cases:
+            raise ValueError(
+                "No dataset cases found; provide --input or add config.dataset"
+            )
     except Exception as e:
         console.print(f"[red]Error: {e}[/red]")
         raise typer.Exit(1)
@@ -246,11 +260,18 @@ def batch_eval(
         refs, rules = format_exemplars_for_jury(case.exemplars)
         try:
             endpoint = resolve_endpoint(case, global_endpoint_specs)
+            assertions, assertion_threshold, quality_threshold = (
+                assertion_policy_for_case(case, jury_config)
+            )
             result = jury.evaluate(
                 prompt=case.prompt,
                 endpoint=endpoint,
                 references=refs,
                 case_rules=rules,
+                assertions=assertions,
+                assertion_threshold=assertion_threshold,
+                quality_threshold=quality_threshold,
+                options=ExecutionOptions(ground_truth=case.ground_truth),
             )
             return eval_record(
                 case_id=case.case_id,
@@ -355,6 +376,7 @@ def list_configs(
         console.print("[yellow]Example configuration structure:[/yellow]")
         example_config = {
             "name": "Example Jury",
+            "score_min": 1,
             "score_scale": 5,
             "llm_provider": {
                 "provider": "openai_compatible",
@@ -422,6 +444,9 @@ def export_results(
                         "jury_name",
                         "composite_score",
                         "normalized_score",
+                        "assertion_score",
+                        "assertions_passed",
+                        "passed",
                         "score_scale",
                         "score_std",
                         "num_trials",
@@ -437,6 +462,9 @@ def export_results(
                             rec.get("run_metadata", {}).get("jury_name", ""),
                             ev.get("composite_score", ""),
                             ev.get("normalized_composite_score", ""),
+                            ev.get("assertion_score", ""),
+                            ev.get("assertions_passed", ""),
+                            ev.get("passed", ""),
                             ev.get("score_scale", ""),
                             cr.get("score_std", ""),
                             cr.get("num_trials", ""),

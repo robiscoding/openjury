@@ -1,0 +1,13 @@
+[
+  {
+    "url": "http://localhost:8080/v1/chat/completions",
+    "alias": "support-agent",
+    "headers": { "Authorization": "Bearer ${AGENT_API_KEY}" },
+    "request_body_template": {
+      "model": "my-model",
+      "messages": [{ "role": "user", "content": "{prompt}" }]
+    },
+    "response_path": "choices.0.message.content",
+    "timeout_s": 30.0
+  }
+]

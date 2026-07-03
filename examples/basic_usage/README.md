@@ -56,19 +56,6 @@ prompt → your agent endpoint → response text
       }
     }
   ],
-  "assertions": [
-    {
-      "name": "no internal error",
-      "type": "not_contains",
-      "value": "Internal Server Error",
-      "case_sensitive": false
-    },
-    {
-      "name": "concise response",
-      "type": "max_length",
-      "value": 2000
-    }
-  ],
   "jurors": [
     {
       "name": "Juror A",
@@ -86,18 +73,37 @@ More real-world setups (OpenRouter, mixed providers, Ollama, etc.): [`../provide
 | Field | Default | Description |
 |-------|---------|-------------|
 | `llm_provider` | required* | Default provider bundle for jurors without a full override |
-| `score_scale` | `5` | All criteria are scored 1–N (global, not per-criterion) |
+| `score_min` | `1` | Minimum integer score; set to `0` to enable zero |
+| `score_scale` | `5` | Maximum integer score (global, not per-criterion) |
 | `num_trials` | `1` | `1` = normal quality eval; `> 1` = consistency audit (see `consistency_audit/`) |
-| `criteria[].rubric` | `null` | Explicit score anchors per level. Strongly recommended — improves inter-juror reliability |
+| `criteria[].rubric` | `null` | Exact anchors (`"1"`) or inclusive ranges (`"1-2"`). Strongly recommended — improves inter-juror reliability |
 | `jurors[].weight` | `1.0` | Relative influence in `weighted_mean`; higher = more authoritative juror |
 | `criteria[].weight` | `1.0` | Relative importance in composite score |
-| `assertions` | `[]` | Deterministic response checks reported separately from juror scores |
+| `assertions` | `{}` | Named assertion-policy registry referenced by dataset rows |
+| `dataset` | `[]` | Inline JSON rows with required `id`/`input` and optional `ground_truth`, `assertion_ids` |
 
-Assertions do not alter `composite_score`; inspect
-`result.assertion_results` for their pass/fail outcomes. See the
+JSON represents a CSV-style dataset as an array of row objects. Put reusable
+contracts in the top-level `assertions` object, then select any number from a
+row with `assertion_ids`. Assertions do not alter `composite_score`; inspect
+`result.assertion_results` for their outcomes. See the
 [`assertions` example](../assertions/) for all supported types.
 
 \*Required unless every juror sets `model_name`, `api_key`, and `provider` together.
+
+Rubric ranges use an inclusive hyphen convention:
+
+```json
+"rubric": {
+  "1-2": "Incorrect or substantially incomplete",
+  "3-4": "Mostly correct with limited omissions",
+  "5": "Fully correct and complete"
+}
+```
+
+When any range is used, the rubric must cover every integer from `score_min`
+through `score_scale` exactly once. Exact-only rubrics may remain sparse (for
+example, anchors at `"1"`, `"3"`, and `"5"`). Decimal scores and boundaries
+are not supported.
 
 ## Agent endpoint format
 

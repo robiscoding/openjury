@@ -2,6 +2,10 @@
 
 Run many prompts through the same jury configuration, recording an `AgentEvalResult` per prompt. Results are written as JSONL — one object per line.
 
+Datasets can be embedded directly in the jury config or supplied separately as
+JSONL/CSV. Embedded JSON uses an array of row objects—the direct equivalent of
+CSV rows with named columns.
+
 ## What you'll learn
 
 - JSONL/CSV dataset formats for batch evaluation
@@ -17,6 +21,33 @@ Run many prompts through the same jury configuration, recording an `AgentEvalRes
 
 ## Dataset formats
 
+### Inline config dataset
+
+```json
+{
+  "assertions": {
+    "brief_answer": {
+      "checks": [
+        {"name": "under 300 characters", "type": "max_length", "value": 300}
+      ],
+      "assertion_threshold": 1.0
+    }
+  },
+  "dataset": [
+    {
+      "id": "case-1",
+      "input": "Explain REST in one sentence.",
+      "ground_truth": "REST is an architectural style for networked systems.",
+      "assertion_ids": ["brief_answer"]
+    }
+  ]
+}
+```
+
+`id` and `input` are required. `ground_truth` and `assertion_ids`
+are optional. IDs must be unique, and assertion references are validated when
+the config loads.
+
 ### JSONL (recommended)
 
 Each non-empty line is one JSON object:
@@ -27,6 +58,8 @@ Each non-empty line is one JSON object:
 | `prompt` | yes | Prompt sent to the agent and evaluated |
 | `endpoints` | no | List of endpoint specs. The **first** entry is used. If omitted, a global `--endpoints-config` must be supplied at run time |
 | `exemplars` | no | Calibration examples + per-case rules (see below) |
+| `assertion_ids` | no | IDs of policies in the config's top-level `assertions` registry |
+| `assertions` | no | Legacy inline deterministic checks; prefer `assertion_ids` |
 | `metadata` | no | Arbitrary JSON for your bookkeeping (not sent to jurors) |
 
 **`exemplars` object** (all parts optional):
@@ -45,7 +78,14 @@ Exemplars are turned into calibration text injected into the juror evaluation pr
 
 Header row must include `case_id`, `prompt`, `endpoints_json`.
 
-Optional columns: `exemplars_json`, `metadata_json`.
+Optional columns: `ground_truth`, `assertion_ids_json`,
+`exemplars_json`, `metadata_json`. Legacy files may also use `assertion_id`,
+`assertions_json`,
+`assertion_threshold`, and `quality_threshold`.
+
+Assertions belong to the case rather than the whole dataset. The same resolved
+policy is applied to each candidate response and consistency trial for that
+case.
 
 ## Endpoint precedence
 
@@ -67,6 +107,9 @@ Each output line contains:
 | `eval` | `null` on failure; `AgentEvalResult` fields on success |
 | `eval.composite_score` | Primary quality score (weighted_mean, trial 1) |
 | `eval.normalized_composite_score` | `composite_score / score_scale` (0–1) |
+| `eval.assertion_score` | Weighted assertion pass rate (0–1) |
+| `eval.assertions_passed` | Whether every required assertion passed |
+| `eval.passed` | Combined required-assertion and configured-threshold status |
 | `eval.score_scale` | Scale used (e.g. `5`) |
 | `eval.scored_metrics` | All canned metrics (weighted_mean, median, weakest_link, …) |
 | `eval.criteria_evaluations` | Per-criterion breakdown with per-juror explanations |
@@ -80,6 +123,12 @@ Each output line contains:
 export MY_AGENT_KEY="..."
 
 # With per-case endpoints in the dataset
+openjury batch-eval \
+  --config ../basic_usage/config.json \
+  --endpoints-config ../basic_usage/endpoints.json \
+  --output results.jsonl
+
+# Or override the inline dataset with an external file
 openjury batch-eval \
   --config ../basic_usage/config.json \
   --input sample_dataset.jsonl \

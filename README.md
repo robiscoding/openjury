@@ -185,7 +185,7 @@ openjury run \
 - **Eight Canned Metrics** — weighted mean, median, harmonic mean, weakest link, juror agreement, and more
 - **Custom Scoring** — register a Python function for domain-specific composite logic
 - **Consistency Audit** — `num_trials > 1` measures response reliability
-- **Batch Evaluation** — JSONL/CSV datasets via CLI or `evaluate_items()`
+- **Batch Evaluation** — inline config datasets, JSONL/CSV files, or `evaluate_items()`
 - **Parallel Processing** — concurrent jurors and batch items
 
 ---
@@ -197,7 +197,7 @@ openjury run \
 | [`examples/hello_world/`](examples/hello_world/) | Offline demo — no agent, no API keys |
 | [`examples/basic_usage/`](examples/basic_usage/) | Single prompt, full pipeline, reading `AgentEvalResult` |
 | [`examples/provider_configs/`](examples/provider_configs/) | OpenAI, OpenRouter, Ollama, mixed providers |
-| [`examples/batch_eval/`](examples/batch_eval/) | JSONL/CSV dataset, `batch-eval` CLI |
+| [`examples/batch_eval/`](examples/batch_eval/) | Inline/JSONL/CSV datasets, `batch-eval` CLI |
 | [`examples/custom_scoring/`](examples/custom_scoring/) | `ScoreAggregator.register()`, safety-gate pattern |
 | [`examples/consistency_audit/`](examples/consistency_audit/) | `num_trials > 1`, `ConsistencyResult.score_std` |
 | [`examples/resume_evaluation/`](examples/resume_evaluation/) | Fetch/score split, crash recovery |
@@ -232,7 +232,7 @@ Full index: [examples/README.md](examples/README.md)
 Advanced topics (moved from this README for brevity):
 
 - [Composable API](docs/composable-api.md) — fetch/score split, batch, serialization
-- [Batch evaluation](recipes/batch-eval-pipeline.md) — JSONL datasets
+- [Batch evaluation](recipes/batch-eval-pipeline.md) — inline and JSONL/CSV datasets
 - [Consistency audit](recipes/consistency-audit-before-ship.md) — `num_trials`
 - [Custom scoring](recipes/custom-scoring-gate.md) — safety gates
 - [Provider setup](docs/provider-config.md) — OpenAI, OpenRouter, Anthropic, Ollama

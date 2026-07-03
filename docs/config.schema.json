@@ -1,5 +1,126 @@
 {
   "$defs": {
+    "AssertionConfig": {
+      "properties": {
+        "name": {
+          "description": "Name or identifier for this assertion",
+          "title": "Name",
+          "type": "string"
+        },
+        "type": {
+          "$ref": "#/$defs/AssertionType",
+          "description": "Type of deterministic assertion"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "integer"
+            }
+          ],
+          "description": "Expected string, list of strings for contains_any/contains_all, or non-negative integer for min_length/max_length",
+          "title": "Value"
+        },
+        "case_sensitive": {
+          "default": true,
+          "description": "Whether string matching should preserve case",
+          "title": "Case Sensitive",
+          "type": "boolean"
+        },
+        "required": {
+          "default": true,
+          "description": "Whether this assertion must pass for assertions_passed to be true",
+          "title": "Required",
+          "type": "boolean"
+        },
+        "weight": {
+          "default": 1.0,
+          "description": "Relative weight used to calculate assertion_score",
+          "exclusiveMinimum": 0.0,
+          "title": "Weight",
+          "type": "number"
+        }
+      },
+      "required": [
+        "name",
+        "type",
+        "value"
+      ],
+      "title": "AssertionConfig",
+      "type": "object"
+    },
+    "AssertionPolicyConfig": {
+      "description": "A reusable group of deterministic checks and pass thresholds.",
+      "properties": {
+        "checks": {
+          "description": "Assertions evaluated as one reusable policy",
+          "items": {
+            "$ref": "#/$defs/AssertionConfig"
+          },
+          "minItems": 1,
+          "title": "Checks",
+          "type": "array"
+        },
+        "assertion_threshold": {
+          "anyOf": [
+            {
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Assertion Threshold"
+        },
+        "quality_threshold": {
+          "anyOf": [
+            {
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Quality Threshold"
+        }
+      },
+      "required": [
+        "checks"
+      ],
+      "title": "AssertionPolicyConfig",
+      "type": "object"
+    },
+    "AssertionType": {
+      "description": "Deterministic checks that can be applied to an agent response.",
+      "enum": [
+        "contains",
+        "not_contains",
+        "equals",
+        "not_equals",
+        "starts_with",
+        "ends_with",
+        "contains_any",
+        "contains_all",
+        "regex",
+        "min_length",
+        "max_length"
+      ],
+      "title": "AssertionType",
+      "type": "string"
+    },
     "CriterionConfig": {
       "properties": {
         "name": {
@@ -32,7 +153,7 @@
             }
           ],
           "default": null,
-          "description": "Optional score anchors keyed by score level string (e.g. '1', '3', '5'). Providing rubric anchors significantly improves inter-rater reliability across different juror models (G-Eval, Liu et al. 2023).",
+          "description": "Optional score anchors keyed by an exact score or inclusive range (e.g. '1', '2-3', '4-5'). Providing rubric anchors significantly improves inter-rater reliability across different juror models (G-Eval, Liu et al. 2023).",
           "title": "Rubric"
         }
       },
@@ -41,6 +162,48 @@
         "description"
       ],
       "title": "CriterionConfig",
+      "type": "object"
+    },
+    "DatasetItemConfig": {
+      "description": "One row in an inline config dataset.",
+      "properties": {
+        "id": {
+          "description": "Stable dataset row identifier",
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "input": {
+          "description": "Prompt sent to the agent; accepts 'prompt' as an input alias",
+          "minLength": 1,
+          "title": "Input",
+          "type": "string"
+        },
+        "ground_truth": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ground Truth"
+        },
+        "assertion_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Assertion Ids",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "input"
+      ],
+      "title": "DatasetItemConfig",
       "type": "object"
     },
     "JurorConfig": {
@@ -222,6 +385,51 @@
       "title": "Criteria",
       "type": "array"
     },
+    "assertions": {
+      "additionalProperties": {
+        "$ref": "#/$defs/AssertionPolicyConfig"
+      },
+      "description": "Reusable assertion policies keyed by IDs referenced from dataset rows. Legacy assertion lists are normalized to a policy named 'default'.",
+      "title": "Assertions",
+      "type": "object"
+    },
+    "dataset": {
+      "description": "Inline dataset represented as an array of JSON row objects",
+      "items": {
+        "$ref": "#/$defs/DatasetItemConfig"
+      },
+      "title": "Dataset",
+      "type": "array"
+    },
+    "assertion_threshold": {
+      "anyOf": [
+        {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Legacy default assertion threshold. New configs should set this on each named AssertionPolicyConfig.",
+      "title": "Assertion Threshold"
+    },
+    "quality_threshold": {
+      "anyOf": [
+        {
+          "minimum": 0.0,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Legacy default quality threshold. New configs should set this on each named AssertionPolicyConfig.",
+      "title": "Quality Threshold"
+    },
     "jurors": {
       "description": "List of juror configurations",
       "items": {
@@ -232,10 +440,18 @@
     },
     "score_scale": {
       "default": 5,
-      "description": "Global score scale for all criteria (e.g. 5 means scores range 1\u20135)",
+      "description": "Global maximum score for all criteria",
       "maximum": 10,
       "minimum": 2,
       "title": "Score Scale",
+      "type": "integer"
+    },
+    "score_min": {
+      "default": 1,
+      "description": "Global minimum score; set to 0 to enable zero scores",
+      "maximum": 1,
+      "minimum": 0,
+      "title": "Score Min",
       "type": "integer"
     },
     "num_trials": {
@@ -282,7 +498,7 @@
         }
       ],
       "default": null,
-      "description": "Optional override for the evaluation prompt template. Must include placeholders: prompt, response, criteria, score_scale, example_criterion_name, references_section, case_rules_section.",
+      "description": "Optional override for the evaluation prompt template. Must include placeholders: prompt, response, criteria, score_min, score_scale, example_criterion_name, references_section, case_rules_section.",
       "title": "Evaluation Template"
     }
   },

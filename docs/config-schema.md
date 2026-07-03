@@ -18,7 +18,8 @@ Machine-readable schema: [config.schema.json](config.schema.json) (regenerate wi
 | `llm_provider` | conditional* | `null` | Default provider for inheriting jurors |
 | `criteria` | yes | — | List of evaluation criteria |
 | `jurors` | yes | — | List of juror configs |
-| `score_scale` | no | `5` | All scores on 1–N axis (2–10) |
+| `score_scale` | no | `5` | Maximum score (2–10) |
+| `score_min` | no | `1` | Minimum integer score; set to `0` to enable a 0–N axis |
 | `num_trials` | no | `1` | 1 = quality; >1 = consistency audit (max 5) |
 | `custom_scoring_function` | no | `null` | Registered custom scorer name |
 | `require_explanation` | no | `true` | Jurors must explain scores |
@@ -42,7 +43,7 @@ Machine-readable schema: [config.schema.json](config.schema.json) (regenerate wi
 | `name` | yes | — | Free-form string; juror JSON must use exact name |
 | `description` | yes | — | What this criterion evaluates |
 | `weight` | no | `1.0` | Importance in composite score |
-| `rubric` | no | `null` | Score anchors keyed by level (`"1"`, `"3"`, `"5"`) |
+| `rubric` | no | `null` | Exact score anchors (`"1"`) or inclusive ranges (`"1-2"`) |
 
 ## `jurors[]`
 

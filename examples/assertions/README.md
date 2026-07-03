@@ -1,8 +1,8 @@
 # Assertions
 
 Run deterministic checks against an agent response without making another LLM
-call. Assertions are configured beside `criteria` and reported separately from
-juror-derived scores.
+call. Assertions are normally configured per evaluation case and reported
+separately from juror-derived scores.
 
 ```bash
 python assertions_demo.py
@@ -30,29 +30,44 @@ response locally.
 String and regex assertions accept `"case_sensitive": false`. It defaults to
 `true`.
 
-Assertions also accept `required` (default `true`) and a positive `weight`
-(default `1.0`):
+Assertions live in a top-level registry. Each named policy groups one or more
+checks with their thresholds:
 
 ```json
-{
-  "name": "contains confirmation number",
-  "type": "regex",
-  "value": "CONF-[0-9]+",
-  "required": true,
-  "weight": 2.0
+"assertions": {
+  "booking_contract": {
+    "checks": [
+      {
+        "name": "contains confirmation number",
+        "type": "regex",
+        "value": "CONF-[0-9]+",
+        "required": true,
+        "weight": 2.0
+      }
+    ],
+    "assertion_threshold": 0.8,
+    "quality_threshold": 4.0
+  }
 }
 ```
 
-At jury level, `assertion_threshold` optionally sets the minimum weighted
-assertion score (from 0 to 1), while `quality_threshold` independently sets the
-minimum juror-derived score:
+Dataset rows reference a policy by ID:
 
 ```json
-{
-  "assertion_threshold": 0.8,
-  "quality_threshold": 4.0
-}
+"dataset": [
+  {
+    "id": "booking-001",
+    "input": "Book the morning flight to Boston.",
+    "ground_truth": "The booking should include a confirmation number.",
+    "assertion_ids": ["booking_contract"]
+  }
+]
 ```
+
+`required` defaults to `true`; `weight` defaults to `1.0`. Policy IDs and
+dataset item IDs are free-form strings, but dataset IDs must be unique and each
+entry in `assertion_ids` must match a registry key. Checks from multiple
+policies are combined; the highest (strictest) threshold wins.
 
 ## Reading results
 

@@ -16,6 +16,7 @@ sys.path.insert(0, str(REPO_ROOT / "src"))
 from openjury import JuryConfig, OpenJury  # noqa: E402
 from openjury.batch_dataset import (  # noqa: E402
     EndpointSpec,
+    assertion_policy_for_case,
     eval_record,
     format_exemplars_for_jury,
     load_cases,
@@ -71,15 +72,24 @@ def main() -> None:
             eval_payload = None
             try:
                 endpoint = resolve_endpoint(case, global_endpoint_specs)
+                assertions, assertion_threshold, quality_threshold = (
+                    assertion_policy_for_case(case, jury_config)
+                )
                 result = jury.score_response(
                     prompt=case.prompt,
                     endpoint=endpoint,
                     references=refs,
                     case_rules=rules,
+                    assertions=assertions,
+                    assertion_threshold=assertion_threshold,
+                    quality_threshold=quality_threshold,
                 )
                 eval_payload = {
                     "composite_score": result.composite_score,
                     "normalized_composite_score": result.normalized_composite_score,
+                    "assertion_score": result.assertion_score,
+                    "assertions_passed": result.assertions_passed,
+                    "passed": result.passed,
                     "score_scale": result.score_scale,
                     "scored_metrics": result.scored_metrics.model_dump(),
                     "criteria_evaluations": {

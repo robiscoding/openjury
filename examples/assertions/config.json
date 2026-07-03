@@ -18,7 +18,9 @@
       "description": "Is the response helpful?"
     }
   ],
-  "assertions": [
+  "assertions": {
+    "order_status_contract": {
+      "checks": [
     {
       "name": "contains order number",
       "type": "contains",
@@ -81,6 +83,16 @@
       "name": "stays concise",
       "type": "max_length",
       "value": 160
+    }
+      ]
+    }
+  },
+  "dataset": [
+    {
+      "id": "order-status-001",
+      "input": "Where is order #12345?",
+      "ground_truth": "Status: shipped. Your order #12345 will arrive Friday.",
+      "assertion_ids": ["order_status_contract"]
     }
   ]
 }

@@ -82,7 +82,14 @@ def main() -> None:
 
 def jury_config_run(jury_config, endpoint, prompt):
     jury = OpenJury(jury_config)
-    return jury.score_response(prompt=prompt, endpoint=endpoint)
+    policy = jury_config.assertions["password_reset_contract"]
+    return jury.score_response(
+        prompt=prompt,
+        endpoint=endpoint,
+        assertions=policy.checks,
+        assertion_threshold=policy.assertion_threshold,
+        quality_threshold=policy.quality_threshold,
+    )
 
 
 if __name__ == "__main__":
