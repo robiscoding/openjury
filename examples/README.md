@@ -7,6 +7,7 @@ Runnable demonstrations of OpenJury. Pick a track based on your goal.
 | Example | Track | Prerequisites | Command |
 |---------|-------|---------------|---------|
 | [`hello_world/`](hello_world/) | Try it | None | `python score_existing.py` |
+| [`kitchen_sink/`](kitchen_sink/) | Config | None (live: keys + agent) | `python kitchen_sink_run.py` |
 | [`assertions/`](assertions/) | Try it | None | `python examples/assertions/assertions_demo.py` |
 | [`basic_usage/`](basic_usage/) | Evaluate | `OPENAI_API_KEY`, agent on :8080 | `python basic_jury_run.py` |
 | [`provider_configs/`](provider_configs/) | Config | Provider-specific keys | See provider README |

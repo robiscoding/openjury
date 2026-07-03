@@ -1,0 +1,205 @@
+{
+  "name": "Kitchen Sink Jury",
+  "description": "Reference config showcasing every major OpenJury option: multi-juror panel, rubrics, assertion policies, inline dataset, consistency trials, and custom scoring.",
+  "score_scale": 5,
+  "num_trials": 2,
+  "custom_scoring_function": "support_gated",
+  "require_explanation": true,
+  "max_retries": 2,
+  "llm_provider": {
+    "provider": "openai_compatible",
+    "model_name": "gpt-4o-mini",
+    "api_key": "${OPENAI_API_KEY}"
+  },
+  "jurors": [
+    {
+      "name": "Support Lead",
+      "system_prompt": "You are a senior support lead. Score responses for resolution quality, policy accuracy, and tone.",
+      "temperature": 0.1,
+      "weight": 2.0
+    },
+    {
+      "name": "Customer Advocate",
+      "system_prompt": "You are the customer. Judge whether the reply actually solves your problem.",
+      "temperature": 0.2,
+      "weight": 1.0
+    },
+    {
+      "name": "Senior Reviewer",
+      "model_name": "gpt-4o",
+      "provider": "openai_compatible",
+      "api_key": "${OPENAI_API_KEY}",
+      "system_prompt": "You are a meticulous QA reviewer. Be strict but fair.",
+      "temperature": 0.0,
+      "weight": 1.5
+    }
+  ],
+  "criteria": [
+    {
+      "name": "helpfulness",
+      "description": "Does the response directly address and resolve the customer's issue?",
+      "weight": 2.0,
+      "rubric": {
+        "1": "Ignores or misunderstands the question",
+        "2": "Acknowledges the question but provides no useful resolution",
+        "3": "Partially addresses the question but misses key information",
+        "4": "Addresses the question well with minor gaps",
+        "5": "Directly and completely resolves the customer's issue"
+      }
+    },
+    {
+      "name": "accuracy",
+      "description": "Is the information factually correct and consistent with policy?",
+      "weight": 2.0,
+      "rubric": {
+        "1": "Contains factual errors or contradicts policy",
+        "3": "Mostly accurate with minor gaps",
+        "5": "Completely accurate and policy-aligned"
+      }
+    },
+    {
+      "name": "tone",
+      "description": "Is the response professional, empathetic, and appropriate?",
+      "weight": 1.0,
+      "rubric": {
+        "1": "Rude, dismissive, or inappropriate",
+        "3": "Neutral but lacks warmth",
+        "5": "Professional, empathetic, and well calibrated"
+      }
+    }
+  ],
+  "assertions": {
+    "default": {
+      "checks": [
+        {
+          "name": "does not expose an internal error",
+          "type": "not_contains",
+          "value": "Internal Server Error",
+          "case_sensitive": false,
+          "required": true
+        },
+        {
+          "name": "response is not empty",
+          "type": "min_length",
+          "value": 10,
+          "required": true
+        }
+      ]
+    },
+    "password_reset_contract": {
+      "checks": [
+        {
+          "name": "mentions password reset",
+          "type": "contains_any",
+          "value": ["reset", "forgot password", "password recovery"],
+          "case_sensitive": false,
+          "required": true,
+          "weight": 2.0
+        },
+        {
+          "name": "does not ask for the current password",
+          "type": "not_contains",
+          "value": "send me your password",
+          "case_sensitive": false,
+          "required": true
+        },
+        {
+          "name": "stays concise",
+          "type": "max_length",
+          "value": 2000,
+          "weight": 1.0,
+          "required": false
+        }
+      ],
+      "assertion_threshold": 1.0,
+      "quality_threshold": 3.0
+    },
+    "order_status_contract": {
+      "checks": [
+        {
+          "name": "contains order number",
+          "type": "contains",
+          "value": "order #12345"
+        },
+        {
+          "name": "starts with a status line",
+          "type": "starts_with",
+          "value": "Status:"
+        },
+        {
+          "name": "ends with the order path",
+          "type": "ends_with",
+          "value": "/orders/12345"
+        },
+        {
+          "name": "mentions a delivery state",
+          "type": "contains_any",
+          "value": ["shipped", "delivered", "delayed"]
+        },
+        {
+          "name": "includes tracking instructions",
+          "type": "contains_all",
+          "value": ["Track it", "https://"]
+        },
+        {
+          "name": "contains a five-digit order number",
+          "type": "regex",
+          "value": "order #[0-9]{5}"
+        },
+        {
+          "name": "has enough detail",
+          "type": "min_length",
+          "value": 40
+        },
+        {
+          "name": "stays concise",
+          "type": "max_length",
+          "value": 160
+        }
+      ],
+      "assertion_threshold": 0.9,
+      "quality_threshold": 3.5
+    },
+    "global_safety": {
+      "checks": [
+        {
+          "name": "does not leak stack traces",
+          "type": "not_contains",
+          "value": "Traceback (most recent call last)",
+          "required": true
+        },
+        {
+          "name": "does not echo a sample SSN",
+          "type": "not_contains",
+          "value": "123-45-6789",
+          "required": false,
+          "weight": 0.5
+        }
+      ]
+    }
+  },
+  "dataset": [
+    {
+      "id": "password-reset-001",
+      "input": "How do I reset my password?",
+      "ground_truth": "Direct the user to the self-service password reset flow without requesting their password.",
+      "assertion_ids": ["password_reset_contract", "global_safety"]
+    },
+    {
+      "id": "order-status-001",
+      "input": "Where is order #12345?",
+      "ground_truth": "Status: shipped. Your order #12345 will arrive Friday.",
+      "assertion_ids": ["order_status_contract"]
+    },
+    {
+      "id": "account-email-001",
+      "input": "How can I change the email address on my account?",
+      "ground_truth": "Explain account settings navigation and any verification steps."
+    },
+    {
+      "id": "baseline-check-001",
+      "input": "What are your support hours?",
+      "assertion_ids": ["default"]
+    }
+  ]
+}
