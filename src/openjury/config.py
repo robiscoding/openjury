@@ -6,6 +6,25 @@ from typing import Any, Dict, List, Optional, Union
 
 from pydantic import AliasChoices, BaseModel, Field, field_validator, model_validator
 
+_RUBRIC_KEY_PATTERN = re.compile(r"^\s*(\d+)\s*(?:-\s*(\d+)\s*)?$")
+
+
+def parse_rubric_key(key: str) -> tuple[int, int]:
+    """Parse an exact score or inclusive score range from a rubric key."""
+    match = _RUBRIC_KEY_PATTERN.fullmatch(key)
+    if match is None:
+        raise ValueError(
+            f"Invalid rubric key {key!r}; use an integer score such as '3' "
+            "or an inclusive range such as '1-2'"
+        )
+    start = int(match.group(1))
+    end = int(match.group(2) or start)
+    if start > end:
+        raise ValueError(
+            f"Invalid rubric range {key!r}; range start cannot exceed range end"
+        )
+    return start, end
+
 
 class JurorProvider(str, Enum):
     OPENAI_COMPATIBLE = "openai_compatible"
@@ -155,7 +174,8 @@ class CriterionConfig(BaseModel):
     rubric: Optional[Dict[str, str]] = Field(
         default=None,
         description=(
-            "Optional score anchors keyed by score level string (e.g. '1', '3', '5'). "
+            "Optional score anchors keyed by an exact score or inclusive range "
+            "(e.g. '1', '2-3', '4-5'). "
             "Providing rubric anchors significantly improves inter-rater reliability "
             "across different juror models (G-Eval, Liu et al. 2023)."
         ),
@@ -172,6 +192,31 @@ class CriterionConfig(BaseModel):
                 if v.upper() == member.name or v.lower() == member.value:
                     return member.value
         return str(v)
+
+    @field_validator("rubric")
+    @classmethod
+    def validate_rubric_syntax(
+        cls, rubric: Optional[Dict[str, str]]
+    ) -> Optional[Dict[str, str]]:
+        if rubric is None:
+            return None
+        if not rubric:
+            raise ValueError("rubric cannot be empty")
+
+        normalized: Dict[str, str] = {}
+        for key, description in rubric.items():
+            start, end = parse_rubric_key(key)
+            normalized_key = str(start) if start == end else f"{start}-{end}"
+            if normalized_key in normalized:
+                raise ValueError(
+                    f"Duplicate rubric interval after normalization: {normalized_key!r}"
+                )
+            if not description.strip():
+                raise ValueError(
+                    f"Rubric description for {normalized_key!r} cannot be empty"
+                )
+            normalized[normalized_key] = description
+        return normalized
 
 
 class LLMProviderConfig(BaseModel):
@@ -299,7 +344,13 @@ class JuryConfig(BaseModel):
         default=5,
         ge=2,
         le=10,
-        description="Global score scale for all criteria (e.g. 5 means scores range 1–5)",
+        description="Global maximum score for all criteria",
+    )
+    score_min: int = Field(
+        default=1,
+        ge=0,
+        le=1,
+        description="Global minimum score; set to 0 to enable zero scores",
     )
     num_trials: int = Field(
         default=1,
@@ -329,8 +380,9 @@ class JuryConfig(BaseModel):
         default=None,
         description=(
             "Optional override for the evaluation prompt template. "
-            "Must include placeholders: prompt, response, criteria, score_scale, "
-            "example_criterion_name, references_section, case_rules_section."
+            "Must include placeholders: prompt, response, criteria, score_min, "
+            "score_scale, example_criterion_name, references_section, "
+            "case_rules_section."
         ),
     )
 
@@ -362,6 +414,39 @@ class JuryConfig(BaseModel):
                     f"assertions.{policy_id}.quality_threshold cannot be greater "
                     f"than score_scale ({self.score_scale})"
                 )
+
+        for criterion in self.criteria:
+            if criterion.rubric is None:
+                continue
+            intervals = [
+                (*parse_rubric_key(key), key) for key in criterion.rubric.keys()
+            ]
+            covered_scores: set[int] = set()
+            uses_range = any(start != end for start, end, _ in intervals)
+            for start, end, key in intervals:
+                if start < self.score_min or end > self.score_scale:
+                    raise ValueError(
+                        f"Criterion {criterion.name!r} rubric key {key!r} is outside "
+                        f"the configured score scale "
+                        f"{self.score_min}-{self.score_scale}"
+                    )
+                interval_scores = set(range(start, end + 1))
+                overlap = covered_scores & interval_scores
+                if overlap:
+                    raise ValueError(
+                        f"Criterion {criterion.name!r} rubric intervals overlap at "
+                        f"score(s) {sorted(overlap)}"
+                    )
+                covered_scores.update(interval_scores)
+            if uses_range:
+                expected_scores = set(range(self.score_min, self.score_scale + 1))
+                missing_scores = sorted(expected_scores - covered_scores)
+                if missing_scores:
+                    raise ValueError(
+                        f"Criterion {criterion.name!r} range rubric must cover every "
+                        f"score from {self.score_min}-{self.score_scale}; "
+                        f"missing {missing_scores}"
+                    )
 
         item_ids = [item.id for item in self.dataset]
         if len(item_ids) != len(set(item_ids)):

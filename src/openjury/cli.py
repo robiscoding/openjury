@@ -376,6 +376,7 @@ def list_configs(
         console.print("[yellow]Example configuration structure:[/yellow]")
         example_config = {
             "name": "Example Jury",
+            "score_min": 1,
             "score_scale": 5,
             "llm_provider": {
                 "provider": "openai_compatible",

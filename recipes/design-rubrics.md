@@ -4,7 +4,8 @@ Structured rubrics dramatically improve `juror_agreement` across diverse juror m
 
 ## Pattern
 
-Key rubric levels by score anchor strings (`"1"`, `"3"`, `"5"`):
+Key rubric levels by exact score strings (`"1"`, `"3"`, `"5"`) or inclusive
+range strings (`"1-2"`, `"3-4"`):
 
 ```json
 {
@@ -18,6 +19,12 @@ Key rubric levels by score anchor strings (`"1"`, `"3"`, `"5"`):
   }
 }
 ```
+
+Use hyphens rather than commas: commas conventionally describe a set, while a
+hyphen clearly communicates an interval. If any range is present, every integer
+from `score_min` through `score_scale` must be covered exactly once. Set
+`score_min` to `0` for zero-based scoring. Sparse exact anchors remain valid;
+decimal scores and boundaries are not supported.
 
 ## Tips
 

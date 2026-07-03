@@ -273,3 +273,36 @@ def test_prompt_template_includes_rubric():
     )
     assert "Confusing" in text
     assert "Crystal clear" in text
+
+
+def test_prompt_template_sorts_rubric_ranges_numerically():
+    from openjury.config import AgentResponse
+
+    criterion = CriterionConfig(
+        name="clarity",
+        description="Is it clear?",
+        rubric={"10": "Excellent", "1-2": "Poor", "3-9": "Acceptable"},
+    )
+    text = PromptTemplate.create_evaluation_prompt(
+        prompt="Q?",
+        response=AgentResponse(content="Answer", id="r1"),
+        criteria=[criterion],
+        score_scale=10,
+    )
+    assert text.index("1-2 — Poor") < text.index("3-9 — Acceptable")
+    assert text.index("3-9 — Acceptable") < text.index("10 — Excellent")
+
+
+def test_prompt_template_supports_zero_based_integer_scores():
+    from openjury.config import AgentResponse
+
+    text = PromptTemplate.create_evaluation_prompt(
+        prompt="Q?",
+        response=AgentResponse(content="Answer", id="r1"),
+        criteria=[CriterionConfig(name="clarity", description="Is it clear?")],
+        score_min=0,
+        score_scale=5,
+    )
+    assert "score each 0-5" in text
+    assert "integer score from 0 to 5" in text
+    assert "Rubric ranges are inclusive" in PromptTemplate.DEFAULT_SYSTEM_PROMPT

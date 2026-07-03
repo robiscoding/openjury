@@ -57,6 +57,35 @@ class TestCriterionConfig:
         c = CriterionConfig(name="clarity", description="d", weight=1.0)
         assert c.rubric is None
 
+    def test_rubric_accepts_and_normalizes_inclusive_ranges(self):
+        c = CriterionConfig(
+            name="tone",
+            description="d",
+            rubric={" 1 - 2 ": "Poor", "3-4": "Acceptable", "5": "Excellent"},
+        )
+        assert c.rubric == {
+            "1-2": "Poor",
+            "3-4": "Acceptable",
+            "5": "Excellent",
+        }
+
+    @pytest.mark.parametrize("key", ["1,2", "1.5-2.5", "one", "4-2", "1-2-3"])
+    def test_rubric_rejects_invalid_range_syntax(self, key):
+        with pytest.raises(ValueError, match="rubric"):
+            CriterionConfig(
+                name="tone",
+                description="d",
+                rubric={key: "Description"},
+            )
+
+    def test_rubric_rejects_empty_descriptions(self):
+        with pytest.raises(ValueError, match="cannot be empty"):
+            CriterionConfig(
+                name="tone",
+                description="d",
+                rubric={"1-5": "  "},
+            )
+
 
 class TestJuryConfig:
     def test_jury_config_creation(self, sample_jury_config):
@@ -88,6 +117,62 @@ class TestJuryConfig:
             score_scale=10,
         )
         assert config.score_scale == 10
+
+    def test_range_rubric_must_cover_score_scale(self, sample_jury_config):
+        sample_jury_config.criteria = [
+            CriterionConfig(
+                name="tone",
+                description="d",
+                rubric={"1-2": "Poor", "4-5": "Good"},
+            )
+        ]
+        with pytest.raises(ValueError, match=r"missing \[3\]"):
+            JuryConfig.model_validate(sample_jury_config.model_dump())
+
+    def test_range_rubric_rejects_overlaps(self, sample_jury_config):
+        sample_jury_config.criteria = [
+            CriterionConfig(
+                name="tone",
+                description="d",
+                rubric={"1-3": "Poor", "3-4": "Okay", "5": "Good"},
+            )
+        ]
+        with pytest.raises(ValueError, match="overlap"):
+            JuryConfig.model_validate(sample_jury_config.model_dump())
+
+    def test_rubric_rejects_scores_outside_scale(self, sample_jury_config):
+        sample_jury_config.criteria = [
+            CriterionConfig(
+                name="tone",
+                description="d",
+                rubric={"1": "Poor", "6": "Impossible"},
+            )
+        ]
+        with pytest.raises(ValueError, match="outside"):
+            JuryConfig.model_validate(sample_jury_config.model_dump())
+
+    def test_sparse_exact_rubric_remains_supported(self, sample_jury_config):
+        sample_jury_config.criteria = [
+            CriterionConfig(
+                name="tone",
+                description="d",
+                rubric={"1": "Poor", "3": "Okay", "5": "Good"},
+            )
+        ]
+        config = JuryConfig.model_validate(sample_jury_config.model_dump())
+        assert config.criteria[0].rubric == {"1": "Poor", "3": "Okay", "5": "Good"}
+
+    def test_zero_based_range_rubric(self, sample_jury_config):
+        sample_jury_config.score_min = 0
+        sample_jury_config.criteria = [
+            CriterionConfig(
+                name="tone",
+                description="d",
+                rubric={"0-2": "Poor", "3-4": "Okay", "5": "Good"},
+            )
+        ]
+        config = JuryConfig.model_validate(sample_jury_config.model_dump())
+        assert config.score_min == 0
 
     def test_inline_dataset_references_assertion_policy(
         self, sample_criteria, sample_jurors, sample_llm_provider

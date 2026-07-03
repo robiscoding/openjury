@@ -1,6 +1,7 @@
 {
   "name": "Kitchen Sink Jury",
   "description": "Reference config showcasing every major OpenJury option: multi-juror panel, rubrics, assertion policies, inline dataset, consistency trials, and custom scoring.",
+  "score_min": 0,
   "score_scale": 5,
   "num_trials": 2,
   "custom_scoring_function": "support_gated",
@@ -62,8 +63,8 @@
       "description": "Is the response professional, empathetic, and appropriate?",
       "weight": 1.0,
       "rubric": {
-        "1": "Rude, dismissive, or inappropriate",
-        "3": "Neutral but lacks warmth",
+        "0-2": "Rude, dismissive, or lacking appropriate care",
+        "3-4": "Neutral to professional, with room for better calibration",
         "5": "Professional, empathetic, and well calibrated"
       }
     }

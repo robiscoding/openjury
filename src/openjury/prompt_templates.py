@@ -1,12 +1,13 @@
 from typing import List, Optional
 
-from openjury.config import AgentResponse, CriterionConfig
+from openjury.config import AgentResponse, CriterionConfig, parse_rubric_key
 
 
 class PromptTemplate:
 
     DEFAULT_SYSTEM_PROMPT = """You are an expert evaluator tasked with judging the quality of an agent's response.
 You will score the response based on specific criteria and provide explanations for each score.
+Use only integer scores within the bounds stated in the evaluation instructions. Rubric ranges are inclusive.
 Be objective, fair, and consistent in your evaluations."""
 
     DEFAULT_EVALUATION_TEMPLATE = """Please evaluate the following agent response to the given prompt.
@@ -17,14 +18,15 @@ Be objective, fair, and consistent in your evaluations."""
 {references_section}{case_rules_section}**Agent Response:**
 {response}
 
-**Evaluation Criteria (score each 1-{score_scale}):**
+**Evaluation Criteria (score each {score_min}-{score_scale}):**
 {criteria}
 
 **Instructions:**
-1. Rate the response for each criterion on a scale of 1 to {score_scale}
-2. Provide a brief explanation for each score
-3. Be objective and consider only the quality relative to the criteria
-4. Return JSON only — no markdown fences, no extra text:
+1. Return an integer score from {score_min} to {score_scale} for each criterion
+2. Treat rubric ranges as inclusive; apply each description to every integer in its range
+3. Provide a brief explanation for each score
+4. Be objective and consider only the quality relative to the criteria
+5. Return JSON only — no markdown fences, no extra text:
 
 {{
   "scores": {{
@@ -67,7 +69,7 @@ Be objective, fair, and consistent in your evaluations."""
             if criterion.rubric:
                 lines.append("   Score anchors:")
                 for level, anchor in sorted(
-                    criterion.rubric.items(), key=lambda x: x[0]
+                    criterion.rubric.items(), key=lambda item: parse_rubric_key(item[0])
                 ):
                     lines.append(f"     {level} — {anchor}")
         return "\n".join(lines)
@@ -85,6 +87,7 @@ Be objective, fair, and consistent in your evaluations."""
         response: AgentResponse,
         criteria: List[CriterionConfig],
         custom_template: Optional[str] = None,
+        score_min: int = 1,
         score_scale: int = 5,
         references: Optional[str] = None,
         case_rules: Optional[str] = None,
@@ -101,6 +104,7 @@ Be objective, fair, and consistent in your evaluations."""
             prompt=prompt,
             response=formatted_response,
             criteria=formatted_criteria,
+            score_min=score_min,
             score_scale=score_scale,
             example_criterion_name=example_criterion_name,
             references_section=references_section,

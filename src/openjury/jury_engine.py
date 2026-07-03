@@ -120,6 +120,7 @@ class OpenJury:
                 prompt=prompt,
                 response=response,
                 criteria=self.config.criteria,
+                score_min=self.config.score_min,
                 score_scale=self.config.score_scale,
                 max_retries=self.config.max_retries,
                 evaluation_template=self.config.evaluation_template,
@@ -339,6 +340,7 @@ class OpenJury:
             prompt=prompt,
             endpoint_alias=endpoint_alias,
             model_name=model_name,
+            score_min=self.config.score_min,
             score_scale=self.config.score_scale,
             composite_score=composite_score,
             normalized_composite_score=normalized,
@@ -679,6 +681,7 @@ class OpenJury:
             "num_assertion_policies": len(self.config.assertions),
             "assertion_threshold": self.config.assertion_threshold,
             "quality_threshold": self.config.quality_threshold,
+            "score_min": self.config.score_min,
             "score_scale": self.config.score_scale,
             "num_trials": self.config.num_trials,
             "jurors": [

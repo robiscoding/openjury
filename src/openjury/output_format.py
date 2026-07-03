@@ -82,6 +82,7 @@ class AgentEvalResult(BaseModel):
     prompt: str
     endpoint_alias: Optional[str] = None
     model_name: Optional[str] = None
+    score_min: int = 1
     score_scale: int
 
     composite_score: float

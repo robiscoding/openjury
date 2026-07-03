@@ -7,10 +7,10 @@ one place. Use it as a template when building production jury configs.
 
 | Area | Features shown |
 |------|----------------|
-| **Jury settings** | `score_scale`, `num_trials` (consistency audit), `custom_scoring_function`, `require_explanation`, `max_retries` |
+| **Jury settings** | `score_min`, `score_scale`, `num_trials` (consistency audit), `custom_scoring_function`, `require_explanation`, `max_retries` |
 | **LLM provider** | Jury-level `llm_provider` with `${OPENAI_API_KEY}` interpolation |
 | **Jurors** | Inherited provider, custom `system_prompt` / `temperature` / `weight`, and a full per-juror override (`model_name` + `api_key` + `provider`) |
-| **Criteria** | Weighted criteria with score-anchor rubrics |
+| **Criteria** | Weighted criteria with exact and inclusive-range score rubrics |
 | **Assertions** | Named policy registry with thresholds, required/optional checks, weights, and most assertion types |
 | **Dataset** | Inline `dataset` rows with `id`, `input`, optional `ground_truth`, and `assertion_ids` (including multi-policy rows and juror-only rows) |
 
@@ -62,6 +62,13 @@ python -m openjury.cli batch-eval \
 
 Rows may reference multiple policies; checks are concatenated and the strictest
 configured threshold wins.
+
+### Rubric ranges
+
+The `tone` criterion demonstrates inclusive range keys: `"0-2"`, `"3-4"`, and
+the exact anchor `"5"`. A range-based rubric must cover every score in the
+configured scale exactly once; overlaps, gaps, reversed ranges, and
+out-of-scale bounds are rejected when the config loads.
 
 ### Dataset rows
 
