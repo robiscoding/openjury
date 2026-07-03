@@ -4,7 +4,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Callable, Dict, List, Optional, Sequence
 
 from openjury.assertions import evaluate_assertions, score_assertions
-from openjury.config import AgentResponse, JuryConfig
+from openjury.config import AgentResponse, AssertionConfig, JuryConfig
 from openjury.endpoint_fetcher import AgentEndpoint, fetch_agent_response
 from openjury.errors import (
     EvaluationErrorCode,
@@ -209,6 +209,7 @@ class OpenJury:
         trial_number: int,
         response: AgentResponse,
         juror_scores: List[JurorScore],
+        assertions: Sequence[AssertionConfig],
     ) -> TrialResult:
         scored_metrics = ScoreAggregator.compute_all(
             juror_scores=juror_scores,
@@ -242,9 +243,7 @@ class OpenJury:
                 explanations=explanations,
             )
 
-        assertion_results = evaluate_assertions(
-            response.content, self.config.assertions
-        )
+        assertion_results = evaluate_assertions(response.content, list(assertions))
         assertion_score, assertions_passed = score_assertions(assertion_results)
 
         return TrialResult(
@@ -256,6 +255,56 @@ class OpenJury:
             assertion_results=assertion_results,
             assertion_score=assertion_score,
             assertions_passed=assertions_passed,
+        )
+
+    def _resolve_assertion_policy(
+        self,
+        assertions: Optional[Sequence[AssertionConfig]],
+        assertion_threshold: Optional[float],
+        quality_threshold: Optional[float],
+    ) -> tuple[Sequence[AssertionConfig], Optional[float], Optional[float]]:
+        default_policy = self.config.assertions.get("default")
+        resolved_assertions = (
+            default_policy.checks
+            if assertions is None and default_policy is not None
+            else ([] if assertions is None else assertions)
+        )
+        resolved_assertion_threshold = (
+            (
+                default_policy.assertion_threshold
+                if default_policy is not None
+                and default_policy.assertion_threshold is not None
+                else self.config.assertion_threshold
+            )
+            if assertion_threshold is None
+            else assertion_threshold
+        )
+        resolved_quality_threshold = (
+            (
+                default_policy.quality_threshold
+                if default_policy is not None
+                and default_policy.quality_threshold is not None
+                else self.config.quality_threshold
+            )
+            if quality_threshold is None
+            else quality_threshold
+        )
+        if (
+            resolved_assertion_threshold is not None
+            and not 0.0 <= resolved_assertion_threshold <= 1.0
+        ):
+            raise ValueError("assertion_threshold must be between 0 and 1")
+        if resolved_quality_threshold is not None and not (
+            0.0 <= resolved_quality_threshold <= self.config.score_scale
+        ):
+            raise ValueError(
+                "quality_threshold must be between 0 and score_scale "
+                f"({self.config.score_scale})"
+            )
+        return (
+            resolved_assertions,
+            resolved_assertion_threshold,
+            resolved_quality_threshold,
         )
 
     def _assemble_eval_result(
@@ -270,6 +319,8 @@ class OpenJury:
         fetch_metadata=None,
         consistency_result=None,
         trial_results: Optional[List[TrialResult]] = None,
+        assertion_threshold: Optional[float] = None,
+        quality_threshold: Optional[float] = None,
     ) -> AgentEvalResult:
         composite_score = trial.scored_metrics.weighted_mean
         normalized = (
@@ -278,12 +329,10 @@ class OpenJury:
             else 0.0
         )
         meets_assertion_threshold = (
-            self.config.assertion_threshold is None
-            or trial.assertion_score >= self.config.assertion_threshold
+            assertion_threshold is None or trial.assertion_score >= assertion_threshold
         )
         meets_quality_threshold = (
-            self.config.quality_threshold is None
-            or composite_score >= self.config.quality_threshold
+            quality_threshold is None or composite_score >= quality_threshold
         )
         return AgentEvalResult(
             jury_name=self.config.name,
@@ -317,10 +366,16 @@ class OpenJury:
         *,
         references: Optional[str] = None,
         case_rules: Optional[str] = None,
+        assertions: Optional[Sequence[AssertionConfig]] = None,
+        assertion_threshold: Optional[float] = None,
+        quality_threshold: Optional[float] = None,
         jurors_to_run: Sequence[str] | None = None,
         options: ExecutionOptions | None = None,
     ) -> "AgentEvalResult":
         """Score a pre-fetched agent response without calling the endpoint again.
+
+        Per-call assertions replace jury-level assertion defaults. Pass an empty
+        sequence to disable assertions for this response.
 
         Raises OpenJuryEvaluationError if all jurors fail. Partial juror failures
         are surfaced in the returned AgentEvalResult.juror_failures list.
@@ -341,12 +396,19 @@ class OpenJury:
                 code=EvaluationErrorCode.ALL_JURORS_FAILED,
             )
 
-        trial = self._build_trial_result(1, agent_response, scoring.juror_scores)
+        assertion_policy = self._resolve_assertion_policy(
+            assertions, assertion_threshold, quality_threshold
+        )
+        trial = self._build_trial_result(
+            1, agent_response, scoring.juror_scores, assertion_policy[0]
+        )
         return self._assemble_eval_result(
             prompt=prompt,
             trial=trial,
             juror_scores=scoring.juror_scores,
             juror_failures=scoring.juror_failures,
+            assertion_threshold=assertion_policy[1],
+            quality_threshold=assertion_policy[2],
         )
 
     def evaluate(
@@ -356,10 +418,20 @@ class OpenJury:
         *,
         references: Optional[str] = None,
         case_rules: Optional[str] = None,
+        assertions: Optional[Sequence[AssertionConfig]] = None,
+        assertion_threshold: Optional[float] = None,
+        quality_threshold: Optional[float] = None,
         options: ExecutionOptions | None = None,
     ) -> AgentEvalResult:
-        """Fetch from endpoint and score the response."""
+        """Fetch from endpoint and score the response.
+
+        Per-call assertions replace jury-level assertion defaults. Pass an empty
+        sequence to disable assertions for this evaluation case.
+        """
         opts = self._resolve_options(options)
+        assertion_policy = self._resolve_assertion_policy(
+            assertions, assertion_threshold, quality_threshold
+        )
 
         logger.info(
             f"Starting evaluation: prompt='{prompt[:60]}...' "
@@ -381,7 +453,9 @@ class OpenJury:
                 "All jurors failed to score trial 1 response",
                 code=EvaluationErrorCode.ALL_JURORS_FAILED,
             )
-        trial1 = self._build_trial_result(1, trial1_response, scoring1.juror_scores)
+        trial1 = self._build_trial_result(
+            1, trial1_response, scoring1.juror_scores, assertion_policy[0]
+        )
         trial_results = [trial1]
 
         consistency_result = None
@@ -410,6 +484,7 @@ class OpenJury:
                     trial_n,
                     trial_fetch.response,
                     trial_scoring.juror_scores,
+                    assertion_policy[0],
                 )
                 trial_results.append(trial_n_result)
                 composite_scores.append(trial_n_result.scored_metrics.weighted_mean)
@@ -429,6 +504,8 @@ class OpenJury:
             fetch_metadata=fetch_result.metadata,
             consistency_result=consistency_result,
             trial_results=trial_results,
+            assertion_threshold=assertion_policy[1],
+            quality_threshold=assertion_policy[2],
         )
         return result
 
@@ -439,6 +516,9 @@ class OpenJury:
         *,
         references: Optional[str] = None,
         case_rules: Optional[str] = None,
+        assertions: Optional[Sequence[AssertionConfig]] = None,
+        assertion_threshold: Optional[float] = None,
+        quality_threshold: Optional[float] = None,
         options: ExecutionOptions | None = None,
     ) -> AgentEvalResult:
         """Backward-compatible alias for :meth:`evaluate`."""
@@ -447,6 +527,9 @@ class OpenJury:
             endpoint,
             references=references,
             case_rules=case_rules,
+            assertions=assertions,
+            assertion_threshold=assertion_threshold,
+            quality_threshold=quality_threshold,
             options=options,
         )
 
@@ -490,6 +573,9 @@ class OpenJury:
                 endpoint=endpoint,
                 references=references,
                 case_rules=case_rules,
+                assertions=item.assertions,
+                assertion_threshold=item.assertion_threshold,
+                quality_threshold=item.quality_threshold,
                 options=item_opts,
             )
             if options.on_progress is not None:
@@ -590,7 +676,7 @@ class OpenJury:
             "description": self.config.description,
             "num_jurors": len(self.jurors),
             "num_criteria": len(self.config.criteria),
-            "num_assertions": len(self.config.assertions),
+            "num_assertion_policies": len(self.config.assertions),
             "assertion_threshold": self.config.assertion_threshold,
             "quality_threshold": self.config.quality_threshold,
             "score_scale": self.config.score_scale,
@@ -612,17 +698,10 @@ class OpenJury:
                 }
                 for criterion in self.config.criteria
             ],
-            "assertions": [
-                {
-                    "name": assertion.name,
-                    "type": assertion.type.value,
-                    "value": assertion.value,
-                    "case_sensitive": assertion.case_sensitive,
-                    "required": assertion.required,
-                    "weight": assertion.weight,
-                }
-                for assertion in self.config.assertions
-            ],
+            "assertions": {
+                policy_id: policy.model_dump(mode="json")
+                for policy_id, policy in self.config.assertions.items()
+            },
         }
 
     @staticmethod

@@ -8,7 +8,9 @@ import logging
 from pathlib import Path
 from typing import Any, Iterator, List, Optional
 
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field, ValidationError, model_validator
+
+from openjury.config import AssertionConfig, JuryConfig
 
 logger = logging.getLogger(__name__)
 
@@ -51,9 +53,31 @@ class BatchCase(BaseModel):
 
     case_id: str
     prompt: str
+    ground_truth: Optional[str] = None
+    assertion_ids: List[str] = Field(default_factory=list)
     endpoints: List[EndpointSpec] = Field(default_factory=list)
     exemplars: Optional[Exemplars] = None
+    assertions: Optional[List[AssertionConfig]] = None
+    assertion_threshold: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    quality_threshold: Optional[float] = Field(default=None, ge=0.0)
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_assertion_ids(cls, value: Any) -> Any:
+        if isinstance(value, dict) and "assertion_ids" not in value:
+            assertion_id = value.get("assertion_id")
+            if assertion_id is not None:
+                return {**value, "assertion_ids": [assertion_id]}
+        return value
+
+    @model_validator(mode="after")
+    def validate_assertion_ids(self) -> "BatchCase":
+        if any(not assertion_id for assertion_id in self.assertion_ids):
+            raise ValueError("assertion_ids cannot contain empty strings")
+        if len(self.assertion_ids) != len(set(self.assertion_ids)):
+            raise ValueError("assertion_ids cannot contain duplicates")
+        return self
 
 
 def format_exemplars_for_jury(
@@ -107,6 +131,62 @@ def resolve_endpoint(
     return AgentEndpoint.model_validate(endpoint_specs[0].model_dump())
 
 
+def cases_from_config(config: JuryConfig) -> List[BatchCase]:
+    """Convert inline JSON dataset rows into the existing batch case model."""
+    cases: List[BatchCase] = []
+    for item in config.dataset:
+        cases.append(
+            BatchCase(
+                case_id=item.id,
+                prompt=item.input,
+                ground_truth=item.ground_truth,
+                assertion_ids=item.assertion_ids,
+                assertions=[],
+            )
+        )
+    return cases
+
+
+def assertion_policy_for_case(
+    case: BatchCase, config: JuryConfig
+) -> tuple[List[AssertionConfig], Optional[float], Optional[float]]:
+    """Resolve a case reference, falling back to legacy inline case assertions."""
+    if case.assertion_ids:
+        unknown_ids = [
+            assertion_id
+            for assertion_id in case.assertion_ids
+            if assertion_id not in config.assertions
+        ]
+        if unknown_ids:
+            raise ValueError(
+                f"Case '{case.case_id}' references unknown assertion_ids {unknown_ids}"
+            )
+        policies = [
+            config.assertions[assertion_id] for assertion_id in case.assertion_ids
+        ]
+        checks = [check for policy in policies for check in policy.checks]
+        assertion_thresholds = [
+            policy.assertion_threshold
+            for policy in policies
+            if policy.assertion_threshold is not None
+        ]
+        quality_thresholds = [
+            policy.quality_threshold
+            for policy in policies
+            if policy.quality_threshold is not None
+        ]
+        return (
+            checks,
+            max(assertion_thresholds) if assertion_thresholds else None,
+            max(quality_thresholds) if quality_thresholds else None,
+        )
+    return (
+        case.assertions or [],
+        case.assertion_threshold,
+        case.quality_threshold,
+    )
+
+
 def _parse_json_cell(raw: str, field: str) -> Any:
     raw = raw.strip()
     if not raw:
@@ -151,6 +231,7 @@ def iter_cases_csv(path: Path) -> Iterator[BatchCase]:
             try:
                 exemplars_raw = (row.get("exemplars_json") or "").strip()
                 meta_raw = (row.get("metadata_json") or "").strip()
+                assertions_raw = (row.get("assertions_json") or "").strip()
                 case_id = (row.get("case_id") or "").strip()
                 prompt = (row.get("prompt") or "").strip()
                 endpoints_cell = (row.get("endpoints_json") or "").strip()
@@ -160,8 +241,25 @@ def iter_cases_csv(path: Path) -> Iterator[BatchCase]:
                     "endpoints": _parse_json_cell(endpoints_cell, "endpoints_json"),
                     "metadata": json.loads(meta_raw) if meta_raw else {},
                 }
+                ground_truth = (row.get("ground_truth") or "").strip()
+                assertion_ids_raw = (row.get("assertion_ids_json") or "").strip()
+                assertion_id = (row.get("assertion_id") or "").strip()
+                if ground_truth:
+                    payload["ground_truth"] = ground_truth
+                if assertion_ids_raw:
+                    payload["assertion_ids"] = json.loads(assertion_ids_raw)
+                elif assertion_id:
+                    payload["assertion_ids"] = [assertion_id]
                 if exemplars_raw:
                     payload["exemplars"] = json.loads(exemplars_raw)
+                if assertions_raw:
+                    payload["assertions"] = json.loads(assertions_raw)
+                assertion_threshold = (row.get("assertion_threshold") or "").strip()
+                quality_threshold = (row.get("quality_threshold") or "").strip()
+                if assertion_threshold:
+                    payload["assertion_threshold"] = float(assertion_threshold)
+                if quality_threshold:
+                    payload["quality_threshold"] = float(quality_threshold)
                 yield BatchCase.model_validate(payload)
             except (json.JSONDecodeError, ValidationError, ValueError) as e:
                 raise ValueError(f"{path}: row {lineno}: {e}") from e

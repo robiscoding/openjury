@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from openjury import AgentResponse, OpenJury
+from openjury import AgentResponse, AssertionConfig, OpenJury
 from openjury.endpoint_fetcher import AgentEndpoint, EndpointFetchError
 from openjury.errors import OpenJuryEvaluationError
 from openjury.execution import (
@@ -71,6 +71,41 @@ def test_evaluate_items_returns_all_results(
     assert all(r.result is not None for r in results)
     assert results[0].item.item_id == "item-1"
     assert mock_fetch.call_count == 2
+
+
+@patch("openjury.jury_engine.fetch_agent_response")
+@patch("openjury.jury_engine.Juror")
+def test_evaluate_items_uses_per_item_assertions(
+    mock_juror_class, mock_fetch, sample_jury_config
+) -> None:
+    mock_fetch.side_effect = [
+        _fetch_result("alpha"),
+        _fetch_result("beta"),
+    ]
+    _make_juror_mocks(mock_juror_class)
+    common = {"type": "contains", "required": True}
+    items = [
+        EvaluationItem(
+            prompt="Q1?",
+            assertions=[AssertionConfig(name="expects alpha", value="alpha", **common)],
+        ),
+        EvaluationItem(
+            prompt="Q2?",
+            assertions=[AssertionConfig(name="expects beta", value="beta", **common)],
+        ),
+    ]
+
+    results = OpenJury(sample_jury_config).evaluate_items(
+        items,
+        AgentEndpoint(url="http://localhost/v1"),
+        options=ExecutionOptions(max_item_workers=1),
+    )
+
+    assert results[0].result is not None
+    assert results[1].result is not None
+    assert results[0].result.assertion_results[0].name == "expects alpha"
+    assert results[1].result.assertion_results[0].name == "expects beta"
+    assert all(item.result.assertions_passed for item in results if item.result)
 
 
 @patch("openjury.jury_engine.fetch_agent_response")

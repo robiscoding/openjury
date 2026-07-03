@@ -98,7 +98,7 @@ def test_assertions_default_to_empty(
         jurors=sample_jurors,
     )
 
-    assert config.assertions == []
+    assert config.assertions == {}
     assert config.assertion_threshold is None
     assert config.quality_threshold is None
 

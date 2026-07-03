@@ -1,4 +1,5 @@
 import pytest
+from pydantic import ValidationError
 
 from openjury import AgentResponse, JuryConfig
 from openjury.config import CriterionConfig, VotingCriteria
@@ -87,3 +88,130 @@ class TestJuryConfig:
             score_scale=10,
         )
         assert config.score_scale == 10
+
+    def test_inline_dataset_references_assertion_policy(
+        self, sample_criteria, sample_jurors, sample_llm_provider
+    ):
+        config = JuryConfig(
+            name="Dataset jury",
+            llm_provider=sample_llm_provider,
+            criteria=sample_criteria,
+            jurors=sample_jurors,
+            assertions={
+                "citation_contract": {
+                    "checks": [
+                        {
+                            "name": "has citation",
+                            "type": "contains",
+                            "value": "https://",
+                        }
+                    ],
+                    "assertion_threshold": 1.0,
+                    "quality_threshold": 4.0,
+                }
+            },
+            dataset=[
+                {
+                    "id": "case-1",
+                    "input": "Answer with a source",
+                    "ground_truth": "A sourced answer",
+                    "assertion_ids": ["citation_contract"],
+                }
+            ],
+        )
+
+        assert config.dataset[0].input == "Answer with a source"
+        assert config.assertions["citation_contract"].checks[0].name == "has citation"
+
+    def test_dataset_rejects_unknown_assertion_id(
+        self, sample_criteria, sample_jurors, sample_llm_provider
+    ):
+        with pytest.raises(ValidationError, match="unknown assertion_id"):
+            JuryConfig(
+                name="Dataset jury",
+                llm_provider=sample_llm_provider,
+                criteria=sample_criteria,
+                jurors=sample_jurors,
+                dataset=[
+                    {
+                        "id": "case-1",
+                        "input": "Hello",
+                        "assertion_ids": ["missing"],
+                    }
+                ],
+            )
+
+    def test_dataset_ids_must_be_unique(
+        self, sample_criteria, sample_jurors, sample_llm_provider
+    ):
+        with pytest.raises(ValidationError, match="must be unique"):
+            JuryConfig(
+                name="Dataset jury",
+                llm_provider=sample_llm_provider,
+                criteria=sample_criteria,
+                jurors=sample_jurors,
+                dataset=[
+                    {"id": "duplicate", "input": "First"},
+                    {"id": "duplicate", "input": "Second"},
+                ],
+            )
+
+    def test_dataset_item_accepts_legacy_singular_assertion_id(
+        self, sample_criteria, sample_jurors, sample_llm_provider
+    ):
+        config = JuryConfig(
+            name="Dataset jury",
+            llm_provider=sample_llm_provider,
+            criteria=sample_criteria,
+            jurors=sample_jurors,
+            assertions={
+                "contract": {
+                    "checks": [{"name": "ok", "type": "contains", "value": "ok"}]
+                }
+            },
+            dataset=[
+                {
+                    "id": "case-1",
+                    "input": "Hello",
+                    "assertion_id": "contract",
+                }
+            ],
+        )
+
+        assert config.dataset[0].assertion_ids == ["contract"]
+
+    def test_dataset_item_rejects_duplicate_assertion_ids(
+        self, sample_criteria, sample_jurors, sample_llm_provider
+    ):
+        with pytest.raises(ValidationError, match="cannot contain duplicates"):
+            JuryConfig(
+                name="Dataset jury",
+                llm_provider=sample_llm_provider,
+                criteria=sample_criteria,
+                jurors=sample_jurors,
+                assertions={
+                    "contract": {
+                        "checks": [{"name": "ok", "type": "contains", "value": "ok"}]
+                    }
+                },
+                dataset=[
+                    {
+                        "id": "case-1",
+                        "input": "Hello",
+                        "assertion_ids": ["contract", "contract"],
+                    }
+                ],
+            )
+
+    def test_legacy_assertion_list_becomes_default_policy(
+        self, sample_criteria, sample_jurors, sample_llm_provider
+    ):
+        config = JuryConfig(
+            name="Legacy",
+            llm_provider=sample_llm_provider,
+            criteria=sample_criteria,
+            jurors=sample_jurors,
+            assertions=[{"name": "legacy", "type": "contains", "value": "ok"}],
+        )
+
+        assert config.assertions["default"].checks[0].name == "legacy"

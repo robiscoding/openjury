@@ -4,7 +4,7 @@ import uuid
 from enum import Enum
 from typing import Any, Dict, List, Optional, Union
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import AliasChoices, BaseModel, Field, field_validator, model_validator
 
 
 class JurorProvider(str, Enum):
@@ -94,11 +94,53 @@ class AssertionConfig(BaseModel):
 
         if self.type == AssertionType.REGEX:
             flags = 0 if self.case_sensitive else re.IGNORECASE
+            assert isinstance(self.value, str)
             try:
                 re.compile(self.value, flags)
             except re.error as exc:
                 raise ValueError(f"Invalid regex pattern: {exc}") from exc
 
+        return self
+
+
+class AssertionPolicyConfig(BaseModel):
+    """A reusable group of deterministic checks and pass thresholds."""
+
+    checks: List[AssertionConfig] = Field(
+        ..., min_length=1, description="Assertions evaluated as one reusable policy"
+    )
+    assertion_threshold: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    quality_threshold: Optional[float] = Field(default=None, ge=0.0)
+
+
+class DatasetItemConfig(BaseModel):
+    """One row in an inline config dataset."""
+
+    id: str = Field(..., min_length=1, description="Stable dataset row identifier")
+    input: str = Field(
+        ...,
+        min_length=1,
+        validation_alias=AliasChoices("input", "prompt"),
+        description="Prompt sent to the agent; accepts 'prompt' as an input alias",
+    )
+    ground_truth: Optional[str] = None
+    assertion_ids: List[str] = Field(default_factory=list)
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_assertion_ids(cls, value: Any) -> Any:
+        if isinstance(value, dict) and "assertion_ids" not in value:
+            assertion_id = value.get("assertion_id")
+            if assertion_id is not None:
+                return {**value, "assertion_ids": [assertion_id]}
+        return value
+
+    @model_validator(mode="after")
+    def validate_assertion_ids(self) -> "DatasetItemConfig":
+        if any(not assertion_id for assertion_id in self.assertion_ids):
+            raise ValueError("assertion_ids cannot contain empty strings")
+        if len(self.assertion_ids) != len(set(self.assertion_ids)):
+            raise ValueError("assertion_ids cannot contain duplicates")
         return self
 
 
@@ -224,28 +266,32 @@ class JuryConfig(BaseModel):
     criteria: List[CriterionConfig] = Field(
         ..., description="List of evaluation criteria"
     )
-    assertions: List[AssertionConfig] = Field(
-        default_factory=list,
+    assertions: Dict[str, AssertionPolicyConfig] = Field(
+        default_factory=dict,
         description=(
-            "Deterministic checks applied to each agent response. Assertion results "
-            "are reported separately and do not affect juror-derived scores."
+            "Reusable assertion policies keyed by IDs referenced from dataset rows. "
+            "Legacy assertion lists are normalized to a policy named 'default'."
         ),
+    )
+    dataset: List[DatasetItemConfig] = Field(
+        default_factory=list,
+        description="Inline dataset represented as an array of JSON row objects",
     )
     assertion_threshold: Optional[float] = Field(
         default=None,
         ge=0.0,
         le=1.0,
         description=(
-            "Optional minimum weighted assertion_score required for passed. "
-            "Required assertions are enforced independently."
+            "Legacy default assertion threshold. New configs should set this on "
+            "each named AssertionPolicyConfig."
         ),
     )
     quality_threshold: Optional[float] = Field(
         default=None,
         ge=0.0,
         description=(
-            "Optional minimum juror-derived composite_score required for passed. "
-            "This does not alter composite_score."
+            "Legacy default quality threshold. New configs should set this on "
+            "each named AssertionPolicyConfig."
         ),
     )
     jurors: List[JurorConfig] = Field(..., description="List of juror configurations")
@@ -288,6 +334,15 @@ class JuryConfig(BaseModel):
         ),
     )
 
+    @field_validator("assertions", mode="before")
+    @classmethod
+    def normalize_assertion_registry(cls, value: Any) -> Any:
+        if isinstance(value, list):
+            if not value:
+                return {}
+            return {"default": {"checks": value}}
+        return value
+
     @model_validator(mode="after")
     def validate_quality_threshold(self) -> "JuryConfig":
         if (
@@ -298,6 +353,30 @@ class JuryConfig(BaseModel):
                 "quality_threshold cannot be greater than score_scale "
                 f"({self.score_scale})"
             )
+        for policy_id, policy in self.assertions.items():
+            if (
+                policy.quality_threshold is not None
+                and policy.quality_threshold > self.score_scale
+            ):
+                raise ValueError(
+                    f"assertions.{policy_id}.quality_threshold cannot be greater "
+                    f"than score_scale ({self.score_scale})"
+                )
+
+        item_ids = [item.id for item in self.dataset]
+        if len(item_ids) != len(set(item_ids)):
+            raise ValueError("dataset item ids must be unique")
+        for item in self.dataset:
+            unknown_ids = [
+                assertion_id
+                for assertion_id in item.assertion_ids
+                if assertion_id not in self.assertions
+            ]
+            if unknown_ids:
+                raise ValueError(
+                    f"Dataset item '{item.id}' references unknown assertion_ids "
+                    f"{unknown_ids}"
+                )
         return self
 
     def get_total_juror_weight(self) -> float:
