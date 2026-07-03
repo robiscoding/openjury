@@ -18,6 +18,7 @@ class JurorScore:
     juror_weight: float
     criterion_scores: Dict[str, float] = field(default_factory=dict)
     criterion_explanations: Dict[str, str] = field(default_factory=dict)
+    latency_ms: Optional[int] = None
 
 
 class ScoredMetrics(BaseModel):

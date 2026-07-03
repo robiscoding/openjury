@@ -1,6 +1,16 @@
 from typing import Any
 
 from openjury.assertions import evaluate_assertions, score_assertions
+from openjury.batch_summary import (
+    BatchEvalResult,
+    BatchRunSummary,
+    CriterionRunSummary,
+    ExecutionCoverage,
+    JurorRunSummary,
+    ScoreBucket,
+    ScoreDistribution,
+    aggregate_batch_results,
+)
 from openjury.config import (
     AgentResponse,
     AssertionConfig,
@@ -32,6 +42,8 @@ from openjury.errors import (
     OpenJuryInitializationError,
 )
 from openjury.execution import (
+    ErrorStage,
+    EvalItemStatus,
     EvaluationItem,
     ExecutionOptions,
     FetchMetadata,
@@ -41,6 +53,7 @@ from openjury.execution import (
     ProgressEvent,
     ProgressEventType,
     ScoringResult,
+    classify_item_error,
 )
 from openjury.juror import Juror
 from openjury.jury_engine import OpenJury
@@ -61,7 +74,7 @@ from openjury.scoring import (
     ScoringFunction,
 )
 
-__version__ = "0.4.0"
+__version__ = "0.5.0"
 __all__ = [
     # Core engine
     "OpenJury",
@@ -101,6 +114,18 @@ __all__ = [
     "ItemEvalResult",
     "ScoringResult",
     "JurorFailure",
+    "EvalItemStatus",
+    "ErrorStage",
+    "classify_item_error",
+    # Batch summary
+    "BatchEvalResult",
+    "BatchRunSummary",
+    "CriterionRunSummary",
+    "ExecutionCoverage",
+    "JurorRunSummary",
+    "ScoreBucket",
+    "ScoreDistribution",
+    "aggregate_batch_results",
     # Endpoint fetching
     "AgentEndpoint",
     "fetch_agent_response",

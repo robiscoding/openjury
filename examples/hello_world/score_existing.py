@@ -38,6 +38,10 @@ AGENT_TEXT = (
     "Each juror scores your response against configurable criteria, "
     "and the results are aggregated into rich quality metrics."
 )
+ITEM_ID = "hello-world-001"
+METADATA = {"example": "hello_world", "track": "quickstart"}
+QUALITY_THRESHOLD = 4.0
+CONTESTED_THRESHOLD = 0.6
 
 
 def demo_result() -> AgentEvalResult:
@@ -56,6 +60,7 @@ def demo_result() -> AgentEvalResult:
                 "factuality": "Accurate overview of OpenJury's purpose.",
                 "clarity": "Clear and well-structured explanation.",
             },
+            latency_ms=1180,
         ),
         JurorScore(
             juror_name="General Juror",
@@ -65,6 +70,7 @@ def demo_result() -> AgentEvalResult:
                 "factuality": "Mostly accurate; minor simplification.",
                 "clarity": "Easy to follow for a newcomer.",
             },
+            latency_ms=940,
         ),
     ]
     metrics = ScoredMetrics(
@@ -74,7 +80,7 @@ def demo_result() -> AgentEvalResult:
         min_score=4.0,
         max_score=4.5,
         harmonic_mean=4.21,
-        weakest_link=0.8,
+        weakest_link=4.17,
         juror_agreement=0.92,
     )
     criteria_evaluations = {
@@ -101,6 +107,11 @@ def demo_result() -> AgentEvalResult:
             },
         ),
     }
+    lowest_criterion = min(
+        criteria_evaluations,
+        key=lambda name: criteria_evaluations[name].weighted_mean_score,
+    )
+    quality_passed = metrics.weighted_mean >= QUALITY_THRESHOLD
     trial = TrialResult(
         trial_number=1,
         response_text=AGENT_TEXT,
@@ -114,6 +125,7 @@ def demo_result() -> AgentEvalResult:
     return AgentEvalResult(
         jury_name="Hello World Jury",
         prompt=PROMPT,
+        model_name="demo-agent",
         score_scale=5,
         composite_score=metrics.weighted_mean,
         normalized_composite_score=metrics.weighted_mean / 5,
@@ -123,7 +135,18 @@ def demo_result() -> AgentEvalResult:
         assertion_results=assertion_results,
         assertion_score=assertion_score,
         assertions_passed=assertions_passed,
-        passed=assertions_passed,
+        passed=assertions_passed and quality_passed,
+        quality_passed=quality_passed,
+        assertion_threshold_met=True,
+        quality_threshold=QUALITY_THRESHOLD,
+        item_id=ITEM_ID,
+        metadata=METADATA,
+        lowest_criterion=lowest_criterion,
+        lowest_criterion_score=criteria_evaluations[
+            lowest_criterion
+        ].weighted_mean_score,
+        contested=metrics.juror_agreement < CONTESTED_THRESHOLD,
+        evaluation_duration_ms=850,
         trial_results=[trial],
     )
 
@@ -140,10 +163,95 @@ def run_live() -> AgentEvalResult:
 
     config = JuryConfig.from_json_file(str(HERE / "config.json"))
     jury = OpenJury(config)
-    return jury.score_existing_response(
+    result = jury.score_existing_response(
         prompt=PROMPT,
         agent_response=AgentResponse(content=AGENT_TEXT, model_name="demo-agent"),
+        quality_threshold=QUALITY_THRESHOLD,
     )
+    return result.model_copy(
+        update={
+            "item_id": ITEM_ID,
+            "metadata": {**METADATA, "mode": "live"},
+        }
+    )
+
+
+def _fmt_threshold(value: float | None) -> str:
+    return "none" if value is None else f"{value:g}"
+
+
+def print_extended_stats(result: AgentEvalResult) -> None:
+    """Print per-item stats used by batch dashboards and execution tables."""
+    scale = result.score_scale
+    print("── Extended stats ──")
+    print(f"  status:                   {result.status}")
+    print(f"  item_id:                  {result.item_id or 'n/a'}")
+    print(f"  metadata:                 {result.metadata or {}}")
+    print(
+        f"  composite_score:          {result.composite_score:.2f} / {scale}  "
+        f"({result.normalized_composite_score:.3f} normalized)"
+    )
+    print(f"  passed:                   {result.passed}")
+    print(f"  quality_passed:           {result.quality_passed}")
+    print(f"  assertions_passed:        {result.assertions_passed}")
+    print(f"  assertion_threshold_met:  {result.assertion_threshold_met}")
+    print(f"  quality_threshold:        {_fmt_threshold(result.quality_threshold)}")
+    print(f"  assertion_threshold:      {_fmt_threshold(result.assertion_threshold)}")
+    print(f"  assertion_score:          {result.assertion_score:.3f}")
+    print(f"  juror_agreement:          {result.scored_metrics.juror_agreement:.3f}")
+    print(f"  contested:                {result.contested}")
+    print(
+        f"  lowest_criterion:         "
+        f"{result.lowest_criterion or 'n/a'}"
+        + (
+            f" ({result.lowest_criterion_score:.2f})"
+            if result.lowest_criterion_score is not None
+            else ""
+        )
+    )
+    print(f"  min_juror_total:          {result.scored_metrics.min_score:.2f}")
+    print(f"  max_juror_total:          {result.scored_metrics.max_score:.2f}")
+    print(f"  weakest_link:             {result.scored_metrics.weakest_link:.2f}")
+    if result.evaluation_duration_ms is not None:
+        print(f"  evaluation_duration_ms:   {result.evaluation_duration_ms}")
+    if result.fetch_metadata is not None and result.fetch_metadata.total_latency_ms:
+        print(
+            "  agent_latency_ms:         " f"{result.fetch_metadata.total_latency_ms}"
+        )
+    if result.juror_failures:
+        print(f"  juror_failures:           {len(result.juror_failures)}")
+        for failure in result.juror_failures:
+            print(f"    - {failure.juror_name}: {failure.code}")
+
+    print()
+    print("  Per-criterion:")
+    for name, criterion in result.criteria_evaluations.items():
+        print(
+            f"    {name:<12} mean={criterion.weighted_mean_score:.2f}  "
+            f"agreement={criterion.juror_agreement:.2f}  "
+            f"min={criterion.min_juror_score:.1f}"
+        )
+
+    print()
+    print("  Per-juror:")
+    panel_mean = result.composite_score
+    for juror in result.juror_scores:
+        total_weight = sum(c.weight for c in result.criteria_evaluations.values())
+        juror_total = (
+            sum(
+                juror.criterion_scores.get(name, 0.0) * criterion.weight
+                for name, criterion in result.criteria_evaluations.items()
+            )
+            / total_weight
+            if total_weight
+            else 0.0
+        )
+        tendency = juror_total - panel_mean
+        latency = f"{juror.latency_ms}ms" if juror.latency_ms is not None else "n/a"
+        print(
+            f"    {juror.juror_name:<14} total={juror_total:.2f}  "
+            f"tendency={tendency:+.2f}  latency={latency}"
+        )
 
 
 def main() -> None:
@@ -165,9 +273,7 @@ def main() -> None:
 
     print(ResultFormatter.format_result(result))
     print()
-    print(f"composite_score:            {result.composite_score:.2f}")
-    print(f"normalized_composite_score: {result.normalized_composite_score:.3f}")
-    print(f"juror_agreement:            {result.scored_metrics.juror_agreement:.3f}")
+    print_extended_stats(result)
 
 
 if __name__ == "__main__":

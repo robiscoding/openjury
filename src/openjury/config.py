@@ -376,6 +376,15 @@ class JuryConfig(BaseModel):
     max_retries: int = Field(
         default=3, ge=0, description="Max retries for failed juror calls"
     )
+    contested_threshold: float = Field(
+        default=0.6,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Juror agreement below this value marks an evaluation as contested "
+            "(low panel consensus)."
+        ),
+    )
     evaluation_template: Optional[str] = Field(
         default=None,
         description=(

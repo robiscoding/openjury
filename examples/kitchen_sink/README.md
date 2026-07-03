@@ -48,7 +48,8 @@ The inline dataset can also be driven from the CLI:
 python -m openjury.cli batch-eval \
   -c examples/kitchen_sink/config.json \
   -e examples/kitchen_sink/endpoints.json \
-  -o /tmp/kitchen_sink_results.jsonl
+  -o /tmp/kitchen_sink_results.jsonl \
+  --summary-output /tmp/kitchen_sink_summary.json
 ```
 
 ## Config map

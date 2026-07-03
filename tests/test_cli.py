@@ -14,6 +14,16 @@ def test_cli_help():
     assert "batch-eval" in result.stdout
 
 
+def test_cli_batch_eval_help_includes_summary_output():
+    result = subprocess.run(
+        [sys.executable, "-m", "openjury.cli", "batch-eval", "--help"],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0
+    assert "--summary-output" in result.stdout
+
+
 def test_cli_list_jurors_shows_criteria():
     result = subprocess.run(
         [sys.executable, "-m", "openjury.cli", "list-jurors"],

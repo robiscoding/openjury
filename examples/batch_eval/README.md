@@ -143,13 +143,35 @@ openjury batch-eval \
   --output results.jsonl
 ```
 
+Write a companion run summary with `--summary-output`:
+
+```bash
+openjury batch-eval \
+  --config ../basic_usage/config.json \
+  --input sample_dataset.jsonl \
+  --endpoints-config endpoints.json \
+  --output results.jsonl \
+  --summary-output summary.json \
+  --workers 4
+```
+
 ### Python script
 
 ```bash
 python batch_run.py \
   --config ../basic_usage/config.json \
   --dataset sample_dataset.jsonl \
-  --output out.jsonl
+  --endpoints-config ../basic_usage/endpoints.json \
+  --output out.jsonl \
+  --summary-output summary.json \
+  --workers 2
+```
+
+For run-level dashboard metrics in-process:
+
+```python
+batch = jury.evaluate_items_with_summary(items, endpoint, options=opts)
+print(batch.summary.pass_rate, batch.summary.mean_composite_score)
 ```
 
 ## Jury config
@@ -161,6 +183,25 @@ Use the same `JuryConfig` JSON as in `basic_usage/`. Key fields:
 - `criteria[].rubric` — recommended for batch evals where consistent juror scoring matters most
 
 ## Analysing output
+
+Each JSONL row includes structured batch fields in addition to the legacy
+`case_id`, `error`, and `eval` keys:
+
+| Field | Description |
+|-------|-------------|
+| `status` | `scored`, `agent_failed`, `all_jurors_failed`, or `cancelled` |
+| `error_code` | Stable machine-readable code when `status != scored` |
+| `error_stage` | `agent`, `juror`, or `infrastructure` |
+| `evaluation_duration_ms` | Wall-clock time for the full item evaluation |
+
+Successful rows also embed richer per-item fields inside `eval`, including
+`item_id`, `metadata`, `quality_passed`, `quality_threshold`, `contested`,
+`lowest_criterion`, and `evaluation_duration_ms`.
+
+When you pass `--summary-output`, OpenJury writes a `summary.json` containing
+`BatchRunSummary` metrics: mean score, pass rate, juror agreement, contested
+count, score distribution (mean/median/P10/min/max + histogram), execution
+coverage, per-criterion breakdown, and juror diagnostics.
 
 The output JSONL is easy to load into pandas or any analytics tool:
 

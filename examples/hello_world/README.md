@@ -4,7 +4,7 @@ See what OpenJury returns in under two minutes — no agent endpoint, no API key
 
 ## What you'll learn
 
-- The shape of an `AgentEvalResult` (composite score, metrics, per-criterion breakdown)
+- The shape of an `AgentEvalResult` (composite score, pass/fail gates, contested flag, per-juror latency)
 - How `score_existing_response()` scores text you already have
 - The difference between offline demo mode and live juror calls
 
@@ -48,6 +48,14 @@ Offline demo — sample AgentEvalResult (no API keys required).
   assertion_score:   1.000
   assertions_passed: true
   passed:             true
+  ...
+── Extended stats ──
+  status:                   scored
+  item_id:                  hello-world-001
+  quality_passed:           true
+  contested:                false
+  lowest_criterion:         clarity (4.17)
+  evaluation_duration_ms:   850
   ...
 ```
 

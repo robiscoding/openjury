@@ -83,6 +83,24 @@ openjury batch-eval \
   --output results.jsonl
 ```
 
+### batch-eval options
+
+| Flag | Description |
+|------|-------------|
+| `--config`, `-c` | Jury config JSON (required) |
+| `--input`, `-i` | JSONL/CSV dataset; omit to use inline `config.dataset` |
+| `--output`, `-o` | Output JSONL path (required) |
+| `--endpoints-config`, `-e` | Global endpoint fallback for cases without inline endpoints |
+| `--limit`, `-n` | Maximum number of cases to run |
+| `--workers`, `-w` | Concurrent item evaluations (default: 1) |
+| `--summary-output` | Optional path for run-level `BatchRunSummary` JSON |
+| `--verbose`, `-v` | Verbose logging |
+
+Each JSONL row includes legacy fields (`case_id`, `error`, `eval`) plus
+`status`, `error_code`, `error_stage`, and `evaluation_duration_ms`. Successful
+rows embed enriched per-item fields inside `eval` (`item_id`, `quality_passed`,
+`contested`, `lowest_criterion`, and more).
+
 ## list-jurors
 
 ```bash
@@ -104,6 +122,16 @@ openjury export-results \
   --input results.jsonl \
   --output summary.csv \
   --format csv
+```
+
+Optionally derive a batch summary from existing JSONL rows:
+
+```bash
+openjury export-results \
+  --input results.jsonl \
+  --output summary.csv \
+  --format csv \
+  --summary-output summary.json
 ```
 
 ## Local development with mock agent

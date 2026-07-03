@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Literal, Optional, Union
 
 from pydantic import BaseModel, Field
 
@@ -9,12 +9,15 @@ from openjury.scoring import ConsistencyResult, JurorScore, ScoredMetrics
 
 
 def juror_score_to_dict(juror_score: JurorScore) -> Dict[str, Any]:
-    return {
+    data: Dict[str, Any] = {
         "juror_name": juror_score.juror_name,
         "juror_weight": juror_score.juror_weight,
         "criterion_scores": juror_score.criterion_scores,
         "criterion_explanations": juror_score.criterion_explanations,
     }
+    if juror_score.latency_ms is not None:
+        data["latency_ms"] = juror_score.latency_ms
+    return data
 
 
 def serialize_eval_result(result: "AgentEvalResult") -> Dict[str, Any]:
@@ -94,6 +97,17 @@ class AgentEvalResult(BaseModel):
     assertion_score: float = 1.0
     assertions_passed: bool = True
     passed: bool = True
+    quality_passed: bool = True
+    assertion_threshold_met: bool = True
+    quality_threshold: Optional[float] = None
+    assertion_threshold: Optional[float] = None
+    item_id: Optional[str] = None
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+    lowest_criterion: Optional[str] = None
+    lowest_criterion_score: Optional[float] = None
+    contested: bool = False
+    evaluation_duration_ms: Optional[int] = None
+    status: Literal["scored"] = "scored"
 
     consistency_result: Optional[ConsistencyResult] = None
     trial_results: List[TrialResult] = Field(default_factory=list)

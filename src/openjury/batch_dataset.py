@@ -271,8 +271,13 @@ def eval_record(
     jury_name: str,
     eval_payload: Optional[dict[str, Any]],
     error: Optional[str],
+    *,
+    status: Optional[str] = None,
+    error_code: Optional[str] = None,
+    error_stage: Optional[str] = None,
+    evaluation_duration_ms: Optional[int] = None,
 ) -> dict[str, Any]:
-    return {
+    record: dict[str, Any] = {
         "case_id": case_id,
         "run_metadata": {
             "jury_name": jury_name,
@@ -281,3 +286,65 @@ def eval_record(
         "error": error,
         "eval": eval_payload,
     }
+    if status is not None:
+        record["status"] = status
+    if error_code is not None:
+        record["error_code"] = error_code
+    if error_stage is not None:
+        record["error_stage"] = error_stage
+    if evaluation_duration_ms is not None:
+        record["evaluation_duration_ms"] = evaluation_duration_ms
+    return record
+
+
+def item_eval_to_record(
+    item_result: Any,
+    *,
+    case_id: str,
+    config_path: Optional[str],
+    jury_name: str,
+    eval_payload: Optional[dict[str, Any]],
+) -> dict[str, Any]:
+    """Build a JSONL row from an ItemEvalResult."""
+    from openjury.execution import EvalItemStatus
+
+    status = item_result.status.value
+    error = (
+        None
+        if item_result.status == EvalItemStatus.SCORED
+        else item_result.error_message
+    )
+    return eval_record(
+        case_id=case_id,
+        config_path=config_path,
+        jury_name=jury_name,
+        eval_payload=eval_payload,
+        error=error,
+        status=status,
+        error_code=item_result.error_code,
+        error_stage=item_result.error_stage,
+        evaluation_duration_ms=item_result.evaluation_duration_ms,
+    )
+
+
+def serialize_batch_run_summary(
+    summary: Any,
+    *,
+    jury_name: str,
+    config_path: Optional[str],
+    started_at: Any,
+    finished_at: Any,
+    duration_ms: int,
+    worker_count: int,
+) -> dict[str, Any]:
+    """Serialize a BatchRunSummary with run metadata for summary.json."""
+    payload = summary.model_dump(mode="json")
+    payload["run_metadata"] = {
+        "jury_name": jury_name,
+        "config_path": config_path,
+        "started_at": started_at.isoformat(),
+        "finished_at": finished_at.isoformat(),
+        "duration_ms": duration_ms,
+        "worker_count": worker_count,
+    }
+    return payload

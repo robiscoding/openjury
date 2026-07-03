@@ -1,5 +1,5 @@
 import json
-from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, List, Optional
 
@@ -13,8 +13,10 @@ from openjury.batch_dataset import (
     cases_from_config,
     eval_record,
     format_exemplars_for_jury,
+    item_eval_to_record,
     load_cases,
     resolve_endpoint,
+    serialize_batch_run_summary,
 )
 from openjury.config import JuryConfig, VotingCriteria
 from openjury.endpoint_fetcher import (
@@ -23,7 +25,7 @@ from openjury.endpoint_fetcher import (
     fetch_all_responses,
     load_endpoints_file,
 )
-from openjury.execution import ExecutionOptions
+from openjury.execution import EvaluationItem, ExecutionOptions
 from openjury.jury_engine import OpenJury
 from openjury.output_format import (
     AgentEvalResult,
@@ -209,6 +211,11 @@ def batch_eval(
     workers: int = typer.Option(
         1, "--workers", "-w", help="Number of concurrent case evaluations"
     ),
+    summary_output: Optional[Path] = typer.Option(
+        None,
+        "--summary-output",
+        help="Optional path for batch run summary JSON",
+    ),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose logging"),
 ):
     if not config.exists():
@@ -256,55 +263,83 @@ def batch_eval(
     output_path.parent.mkdir(parents=True, exist_ok=True)
     cfg_str = str(config.resolve())
 
-    def process_case(case: Any) -> dict[str, Any]:
+    evaluation_items: List[EvaluationItem] = []
+    case_ids: List[str] = []
+    for case in cases:
         refs, rules = format_exemplars_for_jury(case.exemplars)
         try:
             endpoint = resolve_endpoint(case, global_endpoint_specs)
             assertions, assertion_threshold, quality_threshold = (
                 assertion_policy_for_case(case, jury_config)
             )
-            result = jury.evaluate(
+        except Exception as e:
+            console.print(f"[red]Error preparing case {case.case_id}: {e}[/red]")
+            raise typer.Exit(1)
+
+        evaluation_items.append(
+            EvaluationItem(
                 prompt=case.prompt,
-                endpoint=endpoint,
-                references=refs,
-                case_rules=rules,
+                item_id=case.case_id,
+                ground_truth=case.ground_truth,
                 assertions=assertions,
                 assertion_threshold=assertion_threshold,
                 quality_threshold=quality_threshold,
-                options=ExecutionOptions(ground_truth=case.ground_truth),
+                metadata=case.metadata,
+                endpoint=endpoint,
+                references=refs,
+                case_rules=rules,
             )
-            return eval_record(
-                case_id=case.case_id,
-                config_path=cfg_str,
-                jury_name=jury_config.name,
-                eval_payload=serialize_eval_result(result),
-                error=None,
-            )
-        except Exception as e:
-            if verbose:
-                console.print_exception()
-            return eval_record(
-                case_id=case.case_id,
-                config_path=cfg_str,
-                jury_name=jury_config.name,
-                eval_payload=None,
-                error=str(e),
-            )
+        )
+        case_ids.append(case.case_id)
+
+    batch_result = jury.evaluate_items_with_summary(
+        evaluation_items,
+        options=ExecutionOptions(
+            max_item_workers=max(1, workers),
+            ground_truth=None,
+        ),
+    )
 
     with output_path.open("w", encoding="utf-8") as out_f:
-        with ThreadPoolExecutor(max_workers=max(1, workers)) as executor:
-            futures = [executor.submit(process_case, case) for case in cases]
-            for case, future in zip(cases, futures):
-                record = future.result()
-                out_f.write(json.dumps(record, ensure_ascii=False) + "\n")
-                out_f.flush()
-                if verbose:
-                    status = (
-                        "ok"
-                        if record.get("error") is None
-                        else f"error: {record.get('error')}"
+        for case_id, item_result in zip(case_ids, batch_result.items):
+            eval_payload = (
+                serialize_eval_result(item_result.result)
+                if item_result.result is not None
+                else None
+            )
+            record = item_eval_to_record(
+                item_result,
+                case_id=case_id,
+                config_path=cfg_str,
+                jury_name=jury_config.name,
+                eval_payload=eval_payload,
+            )
+            out_f.write(json.dumps(record, ensure_ascii=False) + "\n")
+            if verbose:
+                status = record.get("status", "scored")
+                if status != "scored":
+                    console.print(
+                        f"[cyan]{case_id}[/cyan] error: {record.get('error')}"
                     )
-                    console.print(f"[cyan]{case.case_id}[/cyan] {status}")
+                else:
+                    console.print(f"[cyan]{case_id}[/cyan] ok")
+
+    if summary_output is not None:
+        summary_output.parent.mkdir(parents=True, exist_ok=True)
+        summary_payload = serialize_batch_run_summary(
+            batch_result.summary,
+            jury_name=jury_config.name,
+            config_path=cfg_str,
+            started_at=batch_result.started_at,
+            finished_at=batch_result.finished_at,
+            duration_ms=batch_result.duration_ms,
+            worker_count=max(1, workers),
+        )
+        summary_output.write_text(
+            json.dumps(summary_payload, indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        console.print(f"[green]Wrote summary to {summary_output}[/green]")
 
     console.print(f"[green]Wrote {len(cases)} rows to {output_path}[/green]")
 
@@ -420,6 +455,11 @@ def export_results(
     format: str = typer.Option(
         "csv", "--format", "-f", help="Export format (csv, json)"
     ),
+    summary_output: Optional[Path] = typer.Option(
+        None,
+        "--summary-output",
+        help="Optional path to write batch summary JSON derived from input rows",
+    ),
 ):
     if not results_file.exists():
         console.print(f"[red]Error: Results file {results_file} does not exist[/red]")
@@ -479,6 +519,74 @@ def export_results(
             raise typer.Exit(1)
 
         console.print(f"[green]Results exported to {output_file}[/green]")
+
+        if summary_output is not None:
+            from openjury.batch_summary import aggregate_batch_results
+            from openjury.execution import (
+                EvalItemStatus,
+                EvaluationItem,
+                ItemEvalResult,
+            )
+
+            item_results: List[ItemEvalResult] = []
+            for index, rec in enumerate(records):
+                status_value = rec.get("status")
+                if status_value is None:
+                    status = (
+                        EvalItemStatus.SCORED
+                        if rec.get("error") is None
+                        else EvalItemStatus.AGENT_FAILED
+                    )
+                else:
+                    status = EvalItemStatus(status_value)
+                item = EvaluationItem(
+                    prompt=(rec.get("eval") or {}).get("prompt", ""),
+                    item_id=rec.get("case_id"),
+                )
+                eval_payload = rec.get("eval")
+                result = None
+                if eval_payload is not None:
+                    result = AgentEvalResult.model_validate(eval_payload)
+                item_results.append(
+                    ItemEvalResult(
+                        item=item,
+                        index=index,
+                        result=result,
+                        status=status,
+                        error_code=rec.get("error_code"),
+                        error_message=rec.get("error"),
+                        error_stage=rec.get("error_stage"),
+                        evaluation_duration_ms=rec.get("evaluation_duration_ms"),
+                    )
+                )
+
+            score_scale = 5
+            if item_results and item_results[0].result is not None:
+                score_scale = item_results[0].result.score_scale
+            elif records:
+                ev = records[0].get("eval") or {}
+                score_scale = ev.get("score_scale", 5)
+
+            summary = aggregate_batch_results(
+                item_results,
+                score_scale=score_scale,
+            )
+            run_metadata = records[0].get("run_metadata", {}) if records else {}
+            summary_payload = serialize_batch_run_summary(
+                summary,
+                jury_name=run_metadata.get("jury_name", ""),
+                config_path=run_metadata.get("config_path"),
+                started_at=datetime.now(timezone.utc),
+                finished_at=datetime.now(timezone.utc),
+                duration_ms=0,
+                worker_count=1,
+            )
+            summary_output.parent.mkdir(parents=True, exist_ok=True)
+            summary_output.write_text(
+                json.dumps(summary_payload, indent=2, ensure_ascii=False),
+                encoding="utf-8",
+            )
+            console.print(f"[green]Summary exported to {summary_output}[/green]")
 
     except Exception as e:
         console.print(f"[red]Error: {e}[/red]")
