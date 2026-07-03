@@ -10,6 +10,7 @@ from typing import Any, Iterator, List, Optional
 
 from pydantic import BaseModel, Field, ValidationError, model_validator
 
+from openjury.assertion_resolution import resolve_item_assertions
 from openjury.config import AssertionConfig, JuryConfig
 
 logger = logging.getLogger(__name__)
@@ -54,29 +55,32 @@ class BatchCase(BaseModel):
     case_id: str
     prompt: str
     ground_truth: Optional[str] = None
-    assertion_ids: List[str] = Field(default_factory=list)
+    assertion_profile_ids: List[str] = Field(default_factory=list)
     endpoints: List[EndpointSpec] = Field(default_factory=list)
     exemplars: Optional[Exemplars] = None
-    assertions: Optional[List[AssertionConfig]] = None
+    assertions: List[AssertionConfig] = Field(default_factory=list)
+    variables: dict[str, str] = Field(default_factory=dict)
     assertion_threshold: Optional[float] = Field(default=None, ge=0.0, le=1.0)
     quality_threshold: Optional[float] = Field(default=None, ge=0.0)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="before")
     @classmethod
-    def normalize_assertion_ids(cls, value: Any) -> Any:
-        if isinstance(value, dict) and "assertion_ids" not in value:
-            assertion_id = value.get("assertion_id")
-            if assertion_id is not None:
-                return {**value, "assertion_ids": [assertion_id]}
+    def normalize_assertion_profile_ids(cls, value: Any) -> Any:
+        if isinstance(value, dict) and "assertion_profile_ids" not in value:
+            profile_id = value.get("assertion_profile_id")
+            if profile_id is not None:
+                return {**value, "assertion_profile_ids": [profile_id]}
         return value
 
     @model_validator(mode="after")
-    def validate_assertion_ids(self) -> "BatchCase":
-        if any(not assertion_id for assertion_id in self.assertion_ids):
-            raise ValueError("assertion_ids cannot contain empty strings")
-        if len(self.assertion_ids) != len(set(self.assertion_ids)):
-            raise ValueError("assertion_ids cannot contain duplicates")
+    def validate_assertion_profile_ids(self) -> "BatchCase":
+        if any(not profile_id for profile_id in self.assertion_profile_ids):
+            raise ValueError("assertion_profile_ids cannot contain empty strings")
+        if len(self.assertion_profile_ids) != len(set(self.assertion_profile_ids)):
+            raise ValueError("assertion_profile_ids cannot contain duplicates")
+        if len(self.assertion_profile_ids) > 1:
+            return self
         return self
 
 
@@ -140,8 +144,11 @@ def cases_from_config(config: JuryConfig) -> List[BatchCase]:
                 case_id=item.id,
                 prompt=item.input,
                 ground_truth=item.ground_truth,
-                assertion_ids=item.assertion_ids,
-                assertions=[],
+                assertion_profile_ids=item.assertion_profile_ids,
+                assertions=item.assertions,
+                variables=item.variables,
+                assertion_threshold=item.assertion_threshold,
+                quality_threshold=item.quality_threshold,
             )
         )
     return cases
@@ -150,40 +157,29 @@ def cases_from_config(config: JuryConfig) -> List[BatchCase]:
 def assertion_policy_for_case(
     case: BatchCase, config: JuryConfig
 ) -> tuple[List[AssertionConfig], Optional[float], Optional[float]]:
-    """Resolve a case reference, falling back to legacy inline case assertions."""
-    if case.assertion_ids:
-        unknown_ids = [
-            assertion_id
-            for assertion_id in case.assertion_ids
-            if assertion_id not in config.assertions
-        ]
-        if unknown_ids:
-            raise ValueError(
-                f"Case '{case.case_id}' references unknown assertion_ids {unknown_ids}"
+    """Resolve global, profile, and inline assertions for a batch case."""
+    if len(case.assertion_profile_ids) > 1:
+        profiles_with_thresholds = [
+            profile_id
+            for profile_id in case.assertion_profile_ids
+            if (
+                config.assertion_profiles[profile_id].assertion_threshold is not None
+                or config.assertion_profiles[profile_id].quality_threshold is not None
             )
-        policies = [
-            config.assertions[assertion_id] for assertion_id in case.assertion_ids
         ]
-        checks = [check for policy in policies for check in policy.checks]
-        assertion_thresholds = [
-            policy.assertion_threshold
-            for policy in policies
-            if policy.assertion_threshold is not None
-        ]
-        quality_thresholds = [
-            policy.quality_threshold
-            for policy in policies
-            if policy.quality_threshold is not None
-        ]
-        return (
-            checks,
-            max(assertion_thresholds) if assertion_thresholds else None,
-            max(quality_thresholds) if quality_thresholds else None,
-        )
-    return (
-        case.assertions or [],
-        case.assertion_threshold,
-        case.quality_threshold,
+        if profiles_with_thresholds:
+            raise ValueError(
+                f"Case '{case.case_id}' selects multiple assertion profiles but "
+                f"profiles {profiles_with_thresholds} define thresholds; set "
+                "thresholds on the case or select a single profile"
+            )
+    return resolve_item_assertions(
+        config,
+        profile_ids=case.assertion_profile_ids,
+        inline_assertions=case.assertions,
+        variables=case.variables,
+        item_assertion_threshold=case.assertion_threshold,
+        item_quality_threshold=case.quality_threshold,
     )
 
 
@@ -242,14 +238,17 @@ def iter_cases_csv(path: Path) -> Iterator[BatchCase]:
                     "metadata": json.loads(meta_raw) if meta_raw else {},
                 }
                 ground_truth = (row.get("ground_truth") or "").strip()
-                assertion_ids_raw = (row.get("assertion_ids_json") or "").strip()
-                assertion_id = (row.get("assertion_id") or "").strip()
+                profile_ids_raw = (row.get("assertion_profile_ids_json") or "").strip()
+                profile_id = (row.get("assertion_profile_id") or "").strip()
+                variables_raw = (row.get("variables_json") or "").strip()
                 if ground_truth:
                     payload["ground_truth"] = ground_truth
-                if assertion_ids_raw:
-                    payload["assertion_ids"] = json.loads(assertion_ids_raw)
-                elif assertion_id:
-                    payload["assertion_ids"] = [assertion_id]
+                if profile_ids_raw:
+                    payload["assertion_profile_ids"] = json.loads(profile_ids_raw)
+                elif profile_id:
+                    payload["assertion_profile_ids"] = [profile_id]
+                if variables_raw:
+                    payload["variables"] = json.loads(variables_raw)
                 if exemplars_raw:
                     payload["exemplars"] = json.loads(exemplars_raw)
                 if assertions_raw:
@@ -271,8 +270,13 @@ def eval_record(
     jury_name: str,
     eval_payload: Optional[dict[str, Any]],
     error: Optional[str],
+    *,
+    status: Optional[str] = None,
+    error_code: Optional[str] = None,
+    error_stage: Optional[str] = None,
+    evaluation_duration_ms: Optional[int] = None,
 ) -> dict[str, Any]:
-    return {
+    record: dict[str, Any] = {
         "case_id": case_id,
         "run_metadata": {
             "jury_name": jury_name,
@@ -281,3 +285,65 @@ def eval_record(
         "error": error,
         "eval": eval_payload,
     }
+    if status is not None:
+        record["status"] = status
+    if error_code is not None:
+        record["error_code"] = error_code
+    if error_stage is not None:
+        record["error_stage"] = error_stage
+    if evaluation_duration_ms is not None:
+        record["evaluation_duration_ms"] = evaluation_duration_ms
+    return record
+
+
+def item_eval_to_record(
+    item_result: Any,
+    *,
+    case_id: str,
+    config_path: Optional[str],
+    jury_name: str,
+    eval_payload: Optional[dict[str, Any]],
+) -> dict[str, Any]:
+    """Build a JSONL row from an ItemEvalResult."""
+    from openjury.execution import EvalItemStatus
+
+    status = item_result.status.value
+    error = (
+        None
+        if item_result.status == EvalItemStatus.SCORED
+        else item_result.error_message
+    )
+    return eval_record(
+        case_id=case_id,
+        config_path=config_path,
+        jury_name=jury_name,
+        eval_payload=eval_payload,
+        error=error,
+        status=status,
+        error_code=item_result.error_code,
+        error_stage=item_result.error_stage,
+        evaluation_duration_ms=item_result.evaluation_duration_ms,
+    )
+
+
+def serialize_batch_run_summary(
+    summary: Any,
+    *,
+    jury_name: str,
+    config_path: Optional[str],
+    started_at: Any,
+    finished_at: Any,
+    duration_ms: int,
+    worker_count: int,
+) -> dict[str, Any]:
+    """Serialize a BatchRunSummary with run metadata for summary.json."""
+    payload = summary.model_dump(mode="json")
+    payload["run_metadata"] = {
+        "jury_name": jury_name,
+        "config_path": config_path,
+        "started_at": started_at.isoformat(),
+        "finished_at": finished_at.isoformat(),
+        "duration_ms": duration_ms,
+        "worker_count": worker_count,
+    }
+    return payload

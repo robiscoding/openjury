@@ -1,9 +1,13 @@
 import dataclasses
+import time
 import warnings
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Callable, Dict, List, Optional, Sequence
+from datetime import datetime, timezone
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
+from openjury.assertion_resolution import resolve_item_assertions
 from openjury.assertions import evaluate_assertions, score_assertions
+from openjury.batch_summary import BatchEvalResult, aggregate_batch_results
 from openjury.config import AgentResponse, AssertionConfig, JuryConfig
 from openjury.endpoint_fetcher import AgentEndpoint, fetch_agent_response
 from openjury.errors import (
@@ -13,6 +17,7 @@ from openjury.errors import (
     OpenJuryInitializationError,
 )
 from openjury.execution import (
+    EvalItemStatus,
     EvaluationItem,
     ExecutionOptions,
     ItemEvalResult,
@@ -20,6 +25,7 @@ from openjury.execution import (
     ProgressEvent,
     ProgressEventType,
     ScoringResult,
+    classify_item_error,
 )
 from openjury.juror import Juror
 from openjury.logger import logger
@@ -101,6 +107,30 @@ class OpenJury:
     def _resolve_options(options: ExecutionOptions | None) -> ExecutionOptions:
         return options if options is not None else ExecutionOptions()
 
+    def _resolve_contested_threshold(self, options: ExecutionOptions) -> float:
+        if options.contested_threshold is not None:
+            return options.contested_threshold
+        return self.config.contested_threshold
+
+    @staticmethod
+    def _lowest_criterion(
+        criteria_evaluations: Dict[str, CriterionEvaluation],
+    ) -> Tuple[Optional[str], Optional[float]]:
+        if not criteria_evaluations:
+            return None, None
+        lowest_name = min(
+            criteria_evaluations,
+            key=lambda name: criteria_evaluations[name].weighted_mean_score,
+        )
+        return lowest_name, criteria_evaluations[lowest_name].weighted_mean_score
+
+    def _emit_progress(self, options: ExecutionOptions, event: ProgressEvent) -> None:
+        if options.on_progress is None:
+            return
+        if event.timestamp_ms is None:
+            event.timestamp_ms = time.perf_counter() * 1000.0
+        options.on_progress(event)
+
     def _resolve_juror_workers(self, options: ExecutionOptions, count: int) -> int:
         if not self.parallel_execution or count <= 1:
             return 1
@@ -161,11 +191,12 @@ class OpenJury:
         def run_one(juror: Juror) -> None:
             opts.check_cancelled()
             if opts.on_progress is not None:
-                opts.on_progress(
+                self._emit_progress(
+                    opts,
                     ProgressEvent(
                         type=ProgressEventType.JUROR_STARTED,
                         juror_name=juror.name,
-                    )
+                    ),
                 )
             try:
                 score = self._score_with_juror(
@@ -174,11 +205,12 @@ class OpenJury:
                 juror_scores.append(score)
                 logger.info(f"Juror {juror.name} completed scoring")
                 if opts.on_progress is not None:
-                    opts.on_progress(
+                    self._emit_progress(
+                        opts,
                         ProgressEvent(
                             type=ProgressEventType.JUROR_COMPLETED,
                             juror_name=juror.name,
-                        )
+                        ),
                     )
             except Exception as exc:
                 logger.error(f"Juror {juror.name} failed: {exc}")
@@ -264,31 +296,17 @@ class OpenJury:
         assertion_threshold: Optional[float],
         quality_threshold: Optional[float],
     ) -> tuple[Sequence[AssertionConfig], Optional[float], Optional[float]]:
-        default_policy = self.config.assertions.get("default")
-        resolved_assertions = (
-            default_policy.checks
-            if assertions is None and default_policy is not None
-            else ([] if assertions is None else assertions)
-        )
-        resolved_assertion_threshold = (
-            (
-                default_policy.assertion_threshold
-                if default_policy is not None
-                and default_policy.assertion_threshold is not None
-                else self.config.assertion_threshold
-            )
-            if assertion_threshold is None
-            else assertion_threshold
-        )
-        resolved_quality_threshold = (
-            (
-                default_policy.quality_threshold
-                if default_policy is not None
-                and default_policy.quality_threshold is not None
-                else self.config.quality_threshold
-            )
-            if quality_threshold is None
-            else quality_threshold
+        inline_assertions = [] if assertions is None else list(assertions)
+        (
+            resolved_assertions,
+            resolved_assertion_threshold,
+            resolved_quality_threshold,
+        ) = resolve_item_assertions(
+            self.config,
+            profile_ids=[],
+            inline_assertions=inline_assertions,
+            item_assertion_threshold=assertion_threshold,
+            item_quality_threshold=quality_threshold,
         )
         if (
             resolved_assertion_threshold is not None
@@ -322,6 +340,10 @@ class OpenJury:
         trial_results: Optional[List[TrialResult]] = None,
         assertion_threshold: Optional[float] = None,
         quality_threshold: Optional[float] = None,
+        item_id: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+        contested_threshold: Optional[float] = None,
+        evaluation_duration_ms: Optional[int] = None,
     ) -> AgentEvalResult:
         composite_score = trial.scored_metrics.weighted_mean
         normalized = (
@@ -335,6 +357,12 @@ class OpenJury:
         meets_quality_threshold = (
             quality_threshold is None or composite_score >= quality_threshold
         )
+        resolved_contested_threshold = (
+            contested_threshold
+            if contested_threshold is not None
+            else self.config.contested_threshold
+        )
+        lowest_name, lowest_score = self._lowest_criterion(trial.criteria_evaluations)
         return AgentEvalResult(
             jury_name=self.config.name,
             prompt=prompt,
@@ -355,6 +383,17 @@ class OpenJury:
                 and meets_assertion_threshold
                 and meets_quality_threshold
             ),
+            quality_passed=meets_quality_threshold,
+            assertion_threshold_met=meets_assertion_threshold,
+            quality_threshold=quality_threshold,
+            assertion_threshold=assertion_threshold,
+            item_id=item_id,
+            metadata=metadata or {},
+            lowest_criterion=lowest_name,
+            lowest_criterion_score=lowest_score,
+            contested=trial.scored_metrics.juror_agreement
+            < resolved_contested_threshold,
+            evaluation_duration_ms=evaluation_duration_ms,
             consistency_result=consistency_result,
             trial_results=trial_results or [trial],
             fetch_metadata=fetch_metadata,
@@ -376,8 +415,8 @@ class OpenJury:
     ) -> "AgentEvalResult":
         """Score a pre-fetched agent response without calling the endpoint again.
 
-        Per-call assertions replace jury-level assertion defaults. Pass an empty
-        sequence to disable assertions for this response.
+        Per-call assertions supplement global_assertions. Pass an empty sequence
+        for global checks only.
 
         Raises OpenJuryEvaluationError if all jurors fail. Partial juror failures
         are surfaced in the returned AgentEvalResult.juror_failures list.
@@ -411,6 +450,9 @@ class OpenJury:
             juror_failures=scoring.juror_failures,
             assertion_threshold=assertion_policy[1],
             quality_threshold=assertion_policy[2],
+            contested_threshold=self._resolve_contested_threshold(
+                self._resolve_options(options)
+            ),
         )
 
     def evaluate(
@@ -423,14 +465,18 @@ class OpenJury:
         assertions: Optional[Sequence[AssertionConfig]] = None,
         assertion_threshold: Optional[float] = None,
         quality_threshold: Optional[float] = None,
+        item_id: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+        evaluation_duration_ms: Optional[int] = None,
         options: ExecutionOptions | None = None,
     ) -> AgentEvalResult:
         """Fetch from endpoint and score the response.
 
-        Per-call assertions replace jury-level assertion defaults. Pass an empty
-        sequence to disable assertions for this evaluation case.
+        Per-call assertions supplement global_assertions. Pass an empty sequence
+        for global checks only.
         """
         opts = self._resolve_options(options)
+        contested_threshold = self._resolve_contested_threshold(opts)
         assertion_policy = self._resolve_assertion_policy(
             assertions, assertion_threshold, quality_threshold
         )
@@ -508,6 +554,10 @@ class OpenJury:
             trial_results=trial_results,
             assertion_threshold=assertion_policy[1],
             quality_threshold=assertion_policy[2],
+            item_id=item_id,
+            metadata=metadata,
+            contested_threshold=contested_threshold,
+            evaluation_duration_ms=evaluation_duration_ms,
         )
         return result
 
@@ -539,15 +589,31 @@ class OpenJury:
         self,
         item: EvaluationItem,
         index: int,
-        endpoint: AgentEndpoint,
+        endpoint: AgentEndpoint | None,
         *,
         references: Optional[str],
         case_rules: Optional[str],
         options: ExecutionOptions,
     ) -> ItemEvalResult:
         options.check_cancelled()
-        # Create a per-item copy so concurrent threads never race on shared mutable state.
-        # Preserve the shared semaphore so the global outbound-request limit still applies.
+        item_endpoint = item.endpoint if item.endpoint is not None else endpoint
+        if item_endpoint is None:
+            status, code, stage = classify_item_error(
+                ValueError("No endpoint configured for evaluation item")
+            )
+            return ItemEvalResult(
+                item=item,
+                index=index,
+                error=ValueError("No endpoint configured for evaluation item"),
+                status=status,
+                error_code=code,
+                error_message="No endpoint configured for evaluation item",
+                error_stage=stage,
+            )
+
+        item_refs = item.references if item.references is not None else references
+        item_rules = item.case_rules if item.case_rules is not None else case_rules
+
         item_opts = dataclasses.replace(
             options,
             ground_truth=(
@@ -561,42 +627,65 @@ class OpenJury:
         )
         item_opts._outbound_semaphore = options._outbound_semaphore
 
-        if options.on_progress is not None:
-            options.on_progress(
-                ProgressEvent(
-                    type=ProgressEventType.ITEM_STARTED,
-                    item_index=index,
-                    item_id=item.item_id,
-                )
-            )
+        self._emit_progress(
+            options,
+            ProgressEvent(
+                type=ProgressEventType.ITEM_STARTED,
+                item_index=index,
+                item_id=item.item_id,
+            ),
+        )
+        started = time.perf_counter()
         try:
             result = self.evaluate(
                 prompt=item.prompt,
-                endpoint=endpoint,
-                references=references,
-                case_rules=case_rules,
+                endpoint=item_endpoint,
+                references=item_refs,
+                case_rules=item_rules,
                 assertions=item.assertions,
                 assertion_threshold=item.assertion_threshold,
                 quality_threshold=item.quality_threshold,
+                item_id=item.item_id,
+                metadata=item.metadata,
+                evaluation_duration_ms=None,
                 options=item_opts,
             )
-            if options.on_progress is not None:
-                options.on_progress(
-                    ProgressEvent(
-                        type=ProgressEventType.ITEM_COMPLETED,
-                        item_index=index,
-                        item_id=item.item_id,
-                    )
-                )
-            return ItemEvalResult(item=item, index=index, result=result)
+            duration_ms = int((time.perf_counter() - started) * 1000)
+            result = result.model_copy(update={"evaluation_duration_ms": duration_ms})
+            self._emit_progress(
+                options,
+                ProgressEvent(
+                    type=ProgressEventType.ITEM_COMPLETED,
+                    item_index=index,
+                    item_id=item.item_id,
+                ),
+            )
+            return ItemEvalResult(
+                item=item,
+                index=index,
+                result=result,
+                status=EvalItemStatus.SCORED,
+                evaluation_duration_ms=duration_ms,
+            )
         except Exception as exc:
+            duration_ms = int((time.perf_counter() - started) * 1000)
             logger.error(f"Failed to evaluate item {index}: {exc}")
-            return ItemEvalResult(item=item, index=index, error=exc)
+            status, code, stage = classify_item_error(exc)
+            return ItemEvalResult(
+                item=item,
+                index=index,
+                error=exc,
+                status=status,
+                error_code=code,
+                error_message=str(exc),
+                error_stage=stage,
+                evaluation_duration_ms=duration_ms,
+            )
 
     def evaluate_items(
         self,
         items: Sequence[EvaluationItem],
-        endpoint: AgentEndpoint,
+        endpoint: AgentEndpoint | None = None,
         *,
         references: Optional[str] = None,
         case_rules: Optional[str] = None,
@@ -607,6 +696,10 @@ class OpenJury:
         opts = self._resolve_options(options)
         if not items:
             return []
+        if endpoint is None and any(item.endpoint is None for item in items):
+            raise ValueError(
+                "endpoint is required when any EvaluationItem lacks item.endpoint"
+            )
 
         results: List[Optional[ItemEvalResult]] = [None] * len(items)
         max_workers = min(len(items), max(1, opts.max_item_workers))
@@ -636,6 +729,46 @@ class OpenJury:
                 run_index(index, item)
 
         return [r for r in results if r is not None]
+
+    def evaluate_items_with_summary(
+        self,
+        items: Sequence[EvaluationItem],
+        endpoint: AgentEndpoint | None = None,
+        *,
+        references: Optional[str] = None,
+        case_rules: Optional[str] = None,
+        options: ExecutionOptions | None = None,
+        on_item_complete: Callable[[ItemEvalResult], None] | None = None,
+    ) -> BatchEvalResult:
+        """Evaluate items and return run-level aggregate metrics."""
+        started_at = datetime.now(timezone.utc)
+        run_started = time.perf_counter()
+        opts = self._resolve_options(options)
+        item_results = self.evaluate_items(
+            items,
+            endpoint,
+            references=references,
+            case_rules=case_rules,
+            options=opts,
+            on_item_complete=on_item_complete,
+        )
+        finished_at = datetime.now(timezone.utc)
+        duration_ms = int((time.perf_counter() - run_started) * 1000)
+        summary = aggregate_batch_results(
+            item_results,
+            score_scale=self.config.score_scale,
+            score_min=self.config.score_min,
+            contested_threshold=self._resolve_contested_threshold(opts),
+            quality_threshold=self.config.assertion_policy.quality_threshold,
+            duration_ms=duration_ms,
+        )
+        return BatchEvalResult(
+            items=item_results,
+            summary=summary,
+            started_at=started_at,
+            finished_at=finished_at,
+            duration_ms=duration_ms,
+        )
 
     def score_batch(
         self,
@@ -678,9 +811,10 @@ class OpenJury:
             "description": self.config.description,
             "num_jurors": len(self.jurors),
             "num_criteria": len(self.config.criteria),
-            "num_assertion_policies": len(self.config.assertions),
-            "assertion_threshold": self.config.assertion_threshold,
-            "quality_threshold": self.config.quality_threshold,
+            "num_global_assertions": len(self.config.global_assertions),
+            "num_assertion_profiles": len(self.config.assertion_profiles),
+            "assertion_threshold": self.config.assertion_policy.assertion_threshold,
+            "quality_threshold": self.config.assertion_policy.quality_threshold,
             "score_min": self.config.score_min,
             "score_scale": self.config.score_scale,
             "num_trials": self.config.num_trials,
@@ -701,9 +835,13 @@ class OpenJury:
                 }
                 for criterion in self.config.criteria
             ],
-            "assertions": {
-                policy_id: policy.model_dump(mode="json")
-                for policy_id, policy in self.config.assertions.items()
+            "global_assertions": [
+                assertion.model_dump(mode="json")
+                for assertion in self.config.global_assertions
+            ],
+            "assertion_profiles": {
+                profile_id: profile.model_dump(mode="json")
+                for profile_id, profile in self.config.assertion_profiles.items()
             },
         }
 

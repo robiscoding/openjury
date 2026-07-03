@@ -1,10 +1,22 @@
 from typing import Any
 
+from openjury.assertion_resolution import resolve_item_assertions
 from openjury.assertions import evaluate_assertions, score_assertions
+from openjury.batch_summary import (
+    BatchEvalResult,
+    BatchRunSummary,
+    CriterionRunSummary,
+    ExecutionCoverage,
+    JurorRunSummary,
+    ScoreBucket,
+    ScoreDistribution,
+    aggregate_batch_results,
+)
 from openjury.config import (
     AgentResponse,
     AssertionConfig,
-    AssertionPolicyConfig,
+    AssertionPolicyDefaults,
+    AssertionProfileConfig,
     AssertionType,
     CriterionConfig,
     DatasetItemConfig,
@@ -32,6 +44,8 @@ from openjury.errors import (
     OpenJuryInitializationError,
 )
 from openjury.execution import (
+    ErrorStage,
+    EvalItemStatus,
     EvaluationItem,
     ExecutionOptions,
     FetchMetadata,
@@ -41,6 +55,7 @@ from openjury.execution import (
     ProgressEvent,
     ProgressEventType,
     ScoringResult,
+    classify_item_error,
 )
 from openjury.juror import Juror
 from openjury.jury_engine import OpenJury
@@ -61,7 +76,7 @@ from openjury.scoring import (
     ScoringFunction,
 )
 
-__version__ = "0.4.0"
+__version__ = "0.5.0"
 __all__ = [
     # Core engine
     "OpenJury",
@@ -73,9 +88,11 @@ __all__ = [
     "LLMProviderConfig",
     "CriterionConfig",
     "AssertionConfig",
-    "AssertionPolicyConfig",
+    "AssertionProfileConfig",
+    "AssertionPolicyDefaults",
     "DatasetItemConfig",
     "AssertionType",
+    "resolve_item_assertions",
     "evaluate_assertions",
     "score_assertions",
     "AgentResponse",
@@ -101,6 +118,18 @@ __all__ = [
     "ItemEvalResult",
     "ScoringResult",
     "JurorFailure",
+    "EvalItemStatus",
+    "ErrorStage",
+    "classify_item_error",
+    # Batch summary
+    "BatchEvalResult",
+    "BatchRunSummary",
+    "CriterionRunSummary",
+    "ExecutionCoverage",
+    "JurorRunSummary",
+    "ScoreBucket",
+    "ScoreDistribution",
+    "aggregate_batch_results",
     # Endpoint fetching
     "AgentEndpoint",
     "fetch_agent_response",

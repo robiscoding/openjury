@@ -25,7 +25,10 @@ CSV rows with named columns.
 
 ```json
 {
-  "assertions": {
+  "global_assertions": [
+    {"name": "not empty", "type": "min_length", "value": 1}
+  ],
+  "assertion_profiles": {
     "brief_answer": {
       "checks": [
         {"name": "under 300 characters", "type": "max_length", "value": 300}
@@ -38,15 +41,15 @@ CSV rows with named columns.
       "id": "case-1",
       "input": "Explain REST in one sentence.",
       "ground_truth": "REST is an architectural style for networked systems.",
-      "assertion_ids": ["brief_answer"]
+      "assertion_profile_ids": ["brief_answer"]
     }
   ]
 }
 ```
 
-`id` and `input` are required. `ground_truth` and `assertion_ids`
-are optional. IDs must be unique, and assertion references are validated when
-the config loads.
+`id` and `input` are required. `ground_truth`, `assertion_profile_ids`,
+`variables`, and inline `assertions` are optional. IDs must be unique, and
+profile references are validated when the config loads.
 
 ### JSONL (recommended)
 
@@ -58,8 +61,9 @@ Each non-empty line is one JSON object:
 | `prompt` | yes | Prompt sent to the agent and evaluated |
 | `endpoints` | no | List of endpoint specs. The **first** entry is used. If omitted, a global `--endpoints-config` must be supplied at run time |
 | `exemplars` | no | Calibration examples + per-case rules (see below) |
-| `assertion_ids` | no | IDs of policies in the config's top-level `assertions` registry |
-| `assertions` | no | Legacy inline deterministic checks; prefer `assertion_ids` |
+| `assertion_profile_ids` | no | IDs of profiles in the config's `assertion_profiles` registry |
+| `assertions` | no | Inline deterministic checks supplementing globals and profiles |
+| `variables` | no | Template values for `{{key}}` substitution in profile assertions |
 | `metadata` | no | Arbitrary JSON for your bookkeeping (not sent to jurors) |
 
 **`exemplars` object** (all parts optional):
@@ -78,8 +82,8 @@ Exemplars are turned into calibration text injected into the juror evaluation pr
 
 Header row must include `case_id`, `prompt`, `endpoints_json`.
 
-Optional columns: `ground_truth`, `assertion_ids_json`,
-`exemplars_json`, `metadata_json`. Legacy files may also use `assertion_id`,
+Optional columns: `ground_truth`, `assertion_profile_ids_json`, `variables_json`,
+`exemplars_json`, `metadata_json`. Legacy files may also use `assertion_profile_id`,
 `assertions_json`,
 `assertion_threshold`, and `quality_threshold`.
 
@@ -143,13 +147,35 @@ openjury batch-eval \
   --output results.jsonl
 ```
 
+Write a companion run summary with `--summary-output`:
+
+```bash
+openjury batch-eval \
+  --config ../basic_usage/config.json \
+  --input sample_dataset.jsonl \
+  --endpoints-config endpoints.json \
+  --output results.jsonl \
+  --summary-output summary.json \
+  --workers 4
+```
+
 ### Python script
 
 ```bash
 python batch_run.py \
   --config ../basic_usage/config.json \
   --dataset sample_dataset.jsonl \
-  --output out.jsonl
+  --endpoints-config ../basic_usage/endpoints.json \
+  --output out.jsonl \
+  --summary-output summary.json \
+  --workers 2
+```
+
+For run-level dashboard metrics in-process:
+
+```python
+batch = jury.evaluate_items_with_summary(items, endpoint, options=opts)
+print(batch.summary.pass_rate, batch.summary.mean_composite_score)
 ```
 
 ## Jury config
@@ -161,6 +187,25 @@ Use the same `JuryConfig` JSON as in `basic_usage/`. Key fields:
 - `criteria[].rubric` — recommended for batch evals where consistent juror scoring matters most
 
 ## Analysing output
+
+Each JSONL row includes structured batch fields in addition to the legacy
+`case_id`, `error`, and `eval` keys:
+
+| Field | Description |
+|-------|-------------|
+| `status` | `scored`, `agent_failed`, `all_jurors_failed`, or `cancelled` |
+| `error_code` | Stable machine-readable code when `status != scored` |
+| `error_stage` | `agent`, `juror`, or `infrastructure` |
+| `evaluation_duration_ms` | Wall-clock time for the full item evaluation |
+
+Successful rows also embed richer per-item fields inside `eval`, including
+`item_id`, `metadata`, `quality_passed`, `quality_threshold`, `contested`,
+`lowest_criterion`, and `evaluation_duration_ms`.
+
+When you pass `--summary-output`, OpenJury writes a `summary.json` containing
+`BatchRunSummary` metrics: mean score, pass rate, juror agreement, contested
+count, score distribution (mean/median/P10/min/max + histogram), execution
+coverage, per-criterion breakdown, and juror diagnostics.
 
 The output JSONL is easy to load into pandas or any analytics tool:
 

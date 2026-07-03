@@ -248,7 +248,9 @@ class Juror:
         for attempt in range(max_retries):
             try:
                 logger.debug(f"Juror {self.name} evaluation attempt {attempt + 1}")
+                started = time.perf_counter()
                 response_text = self._call_llm(self.system_prompt, evaluation_prompt)
+                latency_ms = int((time.perf_counter() - started) * 1000)
                 logger.info(f"Juror {self.name} raw response: {response_text[:300]}")
 
                 scores, explanations = self._parse_evaluation_response(
@@ -280,6 +282,7 @@ class Juror:
                     juror_weight=self.config.weight,
                     criterion_scores=scores,
                     criterion_explanations=explanations,
+                    latency_ms=latency_ms,
                 )
 
             except Exception as e:

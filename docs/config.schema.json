@@ -57,11 +57,58 @@
       "title": "AssertionConfig",
       "type": "object"
     },
-    "AssertionPolicyConfig": {
-      "description": "A reusable group of deterministic checks and pass thresholds.",
+    "AssertionPolicyDefaults": {
+      "description": "Default pass thresholds applied when no item or profile override is set.",
       "properties": {
+        "assertion_threshold": {
+          "anyOf": [
+            {
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Assertion Threshold"
+        },
+        "quality_threshold": {
+          "anyOf": [
+            {
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Quality Threshold"
+        }
+      },
+      "title": "AssertionPolicyDefaults",
+      "type": "object"
+    },
+    "AssertionProfileConfig": {
+      "description": "A reusable group of deterministic checks and optional pass thresholds.",
+      "properties": {
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Human-readable label for this assertion profile",
+          "title": "Name"
+        },
         "checks": {
-          "description": "Assertions evaluated as one reusable policy",
+          "description": "Assertions evaluated as one reusable profile",
           "items": {
             "$ref": "#/$defs/AssertionConfig"
           },
@@ -100,7 +147,7 @@
       "required": [
         "checks"
       ],
-      "title": "AssertionPolicyConfig",
+      "title": "AssertionProfileConfig",
       "type": "object"
     },
     "AssertionType": {
@@ -191,12 +238,55 @@
           "default": null,
           "title": "Ground Truth"
         },
-        "assertion_ids": {
+        "assertion_profile_ids": {
           "items": {
             "type": "string"
           },
-          "title": "Assertion Ids",
+          "title": "Assertion Profile Ids",
           "type": "array"
+        },
+        "assertions": {
+          "description": "Optional inline deterministic checks supplementing globals and profiles",
+          "items": {
+            "$ref": "#/$defs/AssertionConfig"
+          },
+          "title": "Assertions",
+          "type": "array"
+        },
+        "variables": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Template variables for {{key}} substitution in profile assertions",
+          "title": "Variables",
+          "type": "object"
+        },
+        "assertion_threshold": {
+          "anyOf": [
+            {
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Assertion Threshold"
+        },
+        "quality_threshold": {
+          "anyOf": [
+            {
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Quality Threshold"
         }
       },
       "required": [
@@ -385,13 +475,25 @@
       "title": "Criteria",
       "type": "array"
     },
-    "assertions": {
-      "additionalProperties": {
-        "$ref": "#/$defs/AssertionPolicyConfig"
+    "global_assertions": {
+      "description": "Deterministic checks applied automatically to every dataset item",
+      "items": {
+        "$ref": "#/$defs/AssertionConfig"
       },
-      "description": "Reusable assertion policies keyed by IDs referenced from dataset rows. Legacy assertion lists are normalized to a policy named 'default'.",
-      "title": "Assertions",
+      "title": "Global Assertions",
+      "type": "array"
+    },
+    "assertion_profiles": {
+      "additionalProperties": {
+        "$ref": "#/$defs/AssertionProfileConfig"
+      },
+      "description": "Reusable assertion profiles keyed by IDs referenced from dataset rows",
+      "title": "Assertion Profiles",
       "type": "object"
+    },
+    "assertion_policy": {
+      "$ref": "#/$defs/AssertionPolicyDefaults",
+      "description": "Default pass thresholds when no item or profile override is set"
     },
     "dataset": {
       "description": "Inline dataset represented as an array of JSON row objects",
@@ -400,35 +502,6 @@
       },
       "title": "Dataset",
       "type": "array"
-    },
-    "assertion_threshold": {
-      "anyOf": [
-        {
-          "maximum": 1.0,
-          "minimum": 0.0,
-          "type": "number"
-        },
-        {
-          "type": "null"
-        }
-      ],
-      "default": null,
-      "description": "Legacy default assertion threshold. New configs should set this on each named AssertionPolicyConfig.",
-      "title": "Assertion Threshold"
-    },
-    "quality_threshold": {
-      "anyOf": [
-        {
-          "minimum": 0.0,
-          "type": "number"
-        },
-        {
-          "type": "null"
-        }
-      ],
-      "default": null,
-      "description": "Legacy default quality threshold. New configs should set this on each named AssertionPolicyConfig.",
-      "title": "Quality Threshold"
     },
     "jurors": {
       "description": "List of juror configurations",
@@ -487,6 +560,14 @@
       "minimum": 0,
       "title": "Max Retries",
       "type": "integer"
+    },
+    "contested_threshold": {
+      "default": 0.6,
+      "description": "Juror agreement below this value marks an evaluation as contested (low panel consensus).",
+      "maximum": 1.0,
+      "minimum": 0.0,
+      "title": "Contested Threshold",
+      "type": "number"
     },
     "evaluation_template": {
       "anyOf": [

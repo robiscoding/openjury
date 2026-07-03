@@ -6,8 +6,9 @@ import pytest
 
 from openjury import AgentResponse, AssertionConfig, OpenJury
 from openjury.endpoint_fetcher import AgentEndpoint, EndpointFetchError
-from openjury.errors import OpenJuryEvaluationError
+from openjury.errors import EvaluationErrorCode, OpenJuryEvaluationError
 from openjury.execution import (
+    EvalItemStatus,
     EvaluationItem,
     ExecutionOptions,
     FetchMetadata,
@@ -131,7 +132,91 @@ def test_evaluate_items_collects_errors_without_raising(
     assert results[0].result is not None
     assert results[0].error is None
     assert results[1].result is None
+    assert results[0].error is None
+    assert results[1].result is None
     assert results[1].error is not None
+    assert results[1].status == EvalItemStatus.AGENT_FAILED
+    assert results[1].error_stage == "agent"
+    assert results[1].evaluation_duration_ms is not None
+
+
+@patch("openjury.jury_engine.fetch_agent_response")
+@patch("openjury.jury_engine.Juror")
+def test_evaluate_items_populates_item_context_fields(
+    mock_juror_class, mock_fetch, sample_jury_config
+) -> None:
+    mock_fetch.return_value = _fetch_result("ok")
+    _make_juror_mocks(mock_juror_class)
+    sample_jury_config.assertion_policy.quality_threshold = 4.0
+
+    jury = OpenJury(sample_jury_config)
+    results = jury.evaluate_items(
+        [
+            EvaluationItem(
+                prompt="Q?",
+                item_id="case-1",
+                metadata={"topic": "rest"},
+                quality_threshold=4.0,
+            )
+        ],
+        AgentEndpoint(url="http://localhost/v1"),
+    )
+
+    result = results[0].result
+    assert result is not None
+    assert result.item_id == "case-1"
+    assert result.metadata == {"topic": "rest"}
+    assert result.quality_threshold == 4.0
+    assert result.quality_passed is True
+    assert result.evaluation_duration_ms is not None
+    assert results[0].status == EvalItemStatus.SCORED
+
+
+@patch("openjury.jury_engine.fetch_agent_response")
+@patch("openjury.jury_engine.Juror")
+def test_evaluate_items_with_summary_returns_aggregate_metrics(
+    mock_juror_class, mock_fetch, sample_jury_config
+) -> None:
+    mock_fetch.side_effect = [_fetch_result("one"), _fetch_result("two")]
+    _make_juror_mocks(mock_juror_class)
+
+    batch = OpenJury(sample_jury_config).evaluate_items_with_summary(
+        [
+            EvaluationItem(prompt="Q1?", item_id="one"),
+            EvaluationItem(prompt="Q2?", item_id="two"),
+        ],
+        AgentEndpoint(url="http://localhost/v1"),
+    )
+
+    assert len(batch.items) == 2
+    assert batch.summary.scored_item_count == 2
+    assert batch.summary.duration_ms is not None
+    assert batch.duration_ms >= 0
+
+
+@patch("openjury.jury_engine.fetch_agent_response")
+@patch("openjury.jury_engine.Juror")
+def test_all_jurors_failed_classified_as_juror_stage(
+    mock_juror_class, mock_fetch, sample_jury_config
+) -> None:
+    mock_fetch.return_value = _fetch_result("ok")
+    mock_juror = MagicMock()
+    mock_juror.name = "Juror A"
+    mock_juror.config.weight = 1.0
+    mock_juror.evaluate.side_effect = OpenJuryEvaluationError(
+        "all failed",
+        code=EvaluationErrorCode.ALL_JURORS_FAILED,
+    )
+    mock_juror_class.side_effect = [mock_juror, mock_juror]
+
+    results = OpenJury(sample_jury_config).evaluate_items(
+        [EvaluationItem(prompt="Q")],
+        AgentEndpoint(url="http://localhost/v1"),
+    )
+
+    assert results[0].status == EvalItemStatus.ALL_JURORS_FAILED
+    assert results[0].error_stage == "juror"
+    assert results[0].error_code == EvaluationErrorCode.ALL_JURORS_FAILED
 
 
 @patch("openjury.jury_engine.fetch_agent_response")

@@ -45,8 +45,7 @@ notebooks = ["jupyter>=1.0.0", "pandas>=2.0.0"]
 dev = [
     "pytest>=7.0.0",
     "pytest-cov>=4.0.0",
-    "black>=23.0.0",
-    "isort>=5.12.0",
+    "ruff>=0.8.0",
     "mypy>=1.0.0",
     "twine>=4.0.0",
 ]
@@ -66,14 +65,17 @@ packages = ["src/openjury"]
 [tool.hatch.build.targets.sdist]
 include = ["/src", "/tests", "/README.md", "/LICENSE"]
 
-[tool.black]
+[tool.ruff]
 line-length = 88
-target-version = ['py311']
-include = '\.pyi?$'
+target-version = "py311"
 
-[tool.isort]
-profile = "black"
-multi_line_output = 3
+[tool.ruff.lint]
+select = ["F841", "I"]
+
+[tool.ruff.lint.isort]
+combine-as-imports = true
+force-wrap-aliases = true
+known-first-party = ["openjury"]
 
 [tool.mypy]
 python_version = "3.11"

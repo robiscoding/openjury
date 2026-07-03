@@ -1,6 +1,13 @@
 import json
+import re
 import subprocess
 import sys
+
+_ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def _strip_ansi(text: str) -> str:
+    return _ANSI_ESCAPE.sub("", text)
 
 
 def test_cli_help():
@@ -12,6 +19,16 @@ def test_cli_help():
     assert result.returncode == 0
     assert "OpenJury" in result.stdout
     assert "batch-eval" in result.stdout
+
+
+def test_cli_batch_eval_help_includes_summary_output():
+    result = subprocess.run(
+        [sys.executable, "-m", "openjury.cli", "batch-eval", "--help"],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0
+    assert "--summary-output" in _strip_ansi(result.stdout)
 
 
 def test_cli_list_jurors_shows_criteria():

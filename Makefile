@@ -8,8 +8,8 @@ help:
 	@echo "  install-dev  - Install package with development dependencies"
 	@echo ""
 	@echo "Code Quality:"
-	@echo "  lint         - Run Black, isort"
-	@echo "  format       - Format code with Black and isort"
+	@echo "  lint         - Run Ruff (format check, imports, unused variables)"
+	@echo "  format       - Format code with Ruff"
 	@echo "  check        - Run all code quality checks (lint + test)"
 	@echo ""
 	@echo "Testing:"
@@ -37,16 +37,16 @@ install-dev:
 
 lint:
 	@echo "Running code quality checks..."
-	@echo "Checking code formatting with Black..."
-	uv run black --check src/ tests/ examples/
-	@echo "Checking import sorting with isort..."
-	uv run isort --check-only src/ tests/ examples/
+	@echo "Checking formatting with Ruff..."
+	uv run ruff format --check src/ tests/ examples/
+	@echo "Running Ruff linter..."
+	uv run ruff check src/ tests/ examples/
 
 format:
-	@echo "Formatting code with Black..."
-	uv run black src/ tests/ examples/
-	@echo "Sorting imports with isort..."
-	uv run isort src/ tests/ examples/
+	@echo "Formatting code with Ruff..."
+	uv run ruff format src/ tests/ examples/
+	@echo "Fixing imports and lint issues with Ruff..."
+	uv run ruff check --fix src/ tests/ examples/
 
 check: lint test
 

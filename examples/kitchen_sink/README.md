@@ -11,8 +11,8 @@ one place. Use it as a template when building production jury configs.
 | **LLM provider** | Jury-level `llm_provider` with `${OPENAI_API_KEY}` interpolation |
 | **Jurors** | Inherited provider, custom `system_prompt` / `temperature` / `weight`, and a full per-juror override (`model_name` + `api_key` + `provider`) |
 | **Criteria** | Weighted criteria with exact and inclusive-range score rubrics |
-| **Assertions** | Named policy registry with thresholds, required/optional checks, weights, and most assertion types |
-| **Dataset** | Inline `dataset` rows with `id`, `input`, optional `ground_truth`, and `assertion_ids` (including multi-policy rows and juror-only rows) |
+| **Assertions** | `global_assertions`, reusable `assertion_profiles`, `assertion_policy` defaults, template variables |
+| **Dataset** | Inline `dataset` rows with `id`, `input`, optional `ground_truth`, `assertion_profile_ids`, and `variables` |
 
 ## Quick start (no API keys)
 
@@ -21,7 +21,7 @@ cd examples/kitchen_sink
 python kitchen_sink_run.py
 ```
 
-This loads and validates `config.json`, resolves assertion policies per dataset row,
+This loads and validates `config.json`, resolves assertions per dataset row,
 and scores canned responses locally.
 
 ## Live evaluation
@@ -48,36 +48,40 @@ The inline dataset can also be driven from the CLI:
 python -m openjury.cli batch-eval \
   -c examples/kitchen_sink/config.json \
   -e examples/kitchen_sink/endpoints.json \
-  -o /tmp/kitchen_sink_results.jsonl
+  -o /tmp/kitchen_sink_results.jsonl \
+  --summary-output /tmp/kitchen_sink_summary.json
 ```
 
 ## Config map
 
-### Assertion policies
+### Assertion layers
 
-- **`default`** — baseline checks applied only when a row references `assertion_ids: ["default"]`
-- **`password_reset_contract`** — domain contract with `assertion_threshold` and `quality_threshold`
-- **`order_status_contract`** — demonstrates `contains`, `starts_with`, `ends_with`, `contains_any`, `contains_all`, `regex`, `min_length`, `max_length`
-- **`global_safety`** — cross-cutting safety checks combinable with other policies
+Resolution order for every item:
 
-Rows may reference multiple policies; checks are concatenated and the strictest
-configured threshold wins.
+1. **`global_assertions`** — applied automatically (empty response, no stack traces, etc.)
+2. **Selected `assertion_profile_ids`** — task-specific contracts
+3. **Inline `dataset[].assertions`** — optional per-row supplements
+
+Default pass thresholds live in **`assertion_policy`**. A single selected profile
+may override them; per-row overrides win over both.
+
+### Assertion profiles
+
+- **`password_reset_contract`** — domain contract with profile-level thresholds
+- **`order_status_contract`** — demonstrates string/list assertion types plus `{{order_number}}` / `{{order_path}}` template variables
 
 ### Rubric ranges
 
-The `tone` criterion demonstrates inclusive range keys: `"0-2"`, `"3-4"`, and
-the exact anchor `"5"`. A range-based rubric must cover every score in the
-configured scale exactly once; overlaps, gaps, reversed ranges, and
-out-of-scale bounds are rejected when the config loads.
+The `tone` criterion demonstrates exact score anchors at `0`, `1`, `3`, and `5`.
 
 ### Dataset rows
 
-| ID | Assertion policies | Notes |
-|----|-------------------|-------|
-| `password-reset-001` | `password_reset_contract`, `global_safety` | Multi-policy row with ground truth |
-| `order-status-001` | `order_status_contract` | Strict formatting contract |
-| `account-email-001` | *(none)* | Juror scoring only |
-| `baseline-check-001` | `default` | Explicit default-policy reference |
+| ID | Profiles | Notes |
+|----|----------|-------|
+| `password-reset-001` | `password_reset_contract` | Globals + profile checks |
+| `order-status-001` | `order_status_contract` | Template variables for order-specific values |
+| `account-email-001` | *(none)* | Global assertions only |
+| `baseline-check-001` | *(none)* | Global assertions only |
 
 ## Related examples
 

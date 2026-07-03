@@ -54,16 +54,22 @@
       }
     }
   ],
-  "assertions": {
+  "assertion_policy": {
+    "assertion_threshold": 1.0,
+    "quality_threshold": 3.0
+  },
+  "global_assertions": [
+    {
+      "name": "does not expose an internal error",
+      "type": "not_contains",
+      "value": "Internal Server Error",
+      "case_sensitive": false,
+      "required": true
+    }
+  ],
+  "assertion_profiles": {
     "password_reset_contract": {
       "checks": [
-        {
-          "name": "does not expose an internal error",
-          "type": "not_contains",
-          "value": "Internal Server Error",
-          "case_sensitive": false,
-          "required": true
-        },
         {
           "name": "response is concise enough for support",
           "type": "max_length",
@@ -80,7 +86,7 @@
       "id": "password-reset-001",
       "input": "How do I reset my password?",
       "ground_truth": "Direct the user to the password reset flow without requesting their password.",
-      "assertion_ids": ["password_reset_contract"]
+      "assertion_profile_ids": ["password_reset_contract"]
     },
     {
       "id": "account-email-001",

@@ -6,14 +6,29 @@ import threading
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import TYPE_CHECKING, Any, Callable, Dict, Iterator, List, Optional
+from typing import TYPE_CHECKING, Any, Callable, Dict, Iterator, List, Literal, Optional
 
 from openjury.config import AgentResponse, AssertionConfig
-from openjury.errors import EvaluationErrorCode, OpenJuryEvaluationError
+from openjury.errors import (
+    EndpointFetchError,
+    EvaluationErrorCode,
+    OpenJuryError,
+    OpenJuryEvaluationError,
+)
 
 if TYPE_CHECKING:
+    from openjury.endpoint_fetcher import AgentEndpoint
     from openjury.output_format import AgentEvalResult
     from openjury.scoring import JurorScore
+
+ErrorStage = Literal["agent", "juror", "infrastructure"]
+
+
+class EvalItemStatus(StrEnum):
+    SCORED = "scored"
+    AGENT_FAILED = "agent_failed"
+    ALL_JURORS_FAILED = "all_jurors_failed"
+    CANCELLED = "cancelled"
 
 
 class ProgressEventType(StrEnum):
@@ -38,6 +53,7 @@ class ExecutionOptions:
     on_progress: Callable[["ProgressEvent"], None] | None = None
     idempotency_key: str | None = None
     ground_truth: str | None = None
+    contested_threshold: float | None = None
     _outbound_semaphore: threading.Semaphore | None = field(
         default=None, init=False, repr=False
     )
@@ -70,6 +86,7 @@ class ProgressEvent:
     item_id: str | None = None
     chunk_count: int | None = None
     accumulated_bytes: int | None = None
+    timestamp_ms: float | None = None
 
 
 @dataclass
@@ -105,6 +122,35 @@ class EvaluationItem:
     assertion_threshold: float | None = None
     quality_threshold: float | None = None
     metadata: Dict[str, Any] = field(default_factory=dict)
+    endpoint: Optional["AgentEndpoint"] = None
+    references: str | None = None
+    case_rules: str | None = None
+
+
+def classify_item_error(
+    exc: Exception,
+) -> tuple[EvalItemStatus, str, ErrorStage]:
+    """Map an evaluation exception to status, stable code, and failure stage."""
+    code = str(getattr(exc, "code", EvaluationErrorCode.EVALUATION_ERROR))
+
+    if isinstance(exc, EndpointFetchError):
+        return EvalItemStatus.AGENT_FAILED, code, "agent"
+
+    if isinstance(exc, OpenJuryEvaluationError):
+        if exc.code == EvaluationErrorCode.ALL_JURORS_FAILED:
+            return EvalItemStatus.ALL_JURORS_FAILED, code, "juror"
+        if exc.code == EvaluationErrorCode.EVALUATION_CANCELLED:
+            return EvalItemStatus.CANCELLED, code, "infrastructure"
+        return EvalItemStatus.AGENT_FAILED, code, "infrastructure"
+
+    if isinstance(exc, OpenJuryError):
+        return EvalItemStatus.AGENT_FAILED, code, "infrastructure"
+
+    return (
+        EvalItemStatus.AGENT_FAILED,
+        EvaluationErrorCode.EVALUATION_ERROR,
+        "infrastructure",
+    )
 
 
 @dataclass
@@ -125,3 +171,8 @@ class ItemEvalResult:
     index: int
     result: Optional["AgentEvalResult"] = None
     error: Optional[Exception] = None
+    status: EvalItemStatus = EvalItemStatus.SCORED
+    error_code: str | None = None
+    error_message: str | None = None
+    error_stage: ErrorStage | None = None
+    evaluation_duration_ms: int | None = None

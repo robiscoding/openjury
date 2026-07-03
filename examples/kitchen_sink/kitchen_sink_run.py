@@ -109,7 +109,8 @@ def run_offline(config: JuryConfig) -> None:
     print(f"Loaded config: {config.name!r}")
     print(f"  jurors:           {len(config.jurors)}")
     print(f"  criteria:         {len(config.criteria)}")
-    print(f"  assertion policies: {len(config.assertions)}")
+    print(f"  global assertions: {len(config.global_assertions)}")
+    print(f"  assertion profiles: {len(config.assertion_profiles)}")
     print(f"  dataset rows:     {len(config.dataset)}")
     print(f"  num_trials:       {config.num_trials}")
     print(f"  custom scoring:   {config.custom_scoring_function!r}")
@@ -132,7 +133,10 @@ def run_offline(config: JuryConfig) -> None:
         print(f"prompt: {case.prompt!r}")
         if case.ground_truth:
             print(f"ground_truth: {case.ground_truth!r}")
-        print(f"assertion_ids: {case.assertion_ids or '(none — juror scoring only)'}")
+        print(
+            f"assertion_profile_ids: "
+            f"{case.assertion_profile_ids or '(none — global assertions only)'}"
+        )
         print(f"checks resolved: {len(checks)}")
         for ar in results:
             status = "PASS" if ar.passed else "FAIL"

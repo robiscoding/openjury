@@ -2,6 +2,10 @@
   "name": "Hello World Jury",
   "description": "Minimal jury for the offline quickstart example",
   "score_scale": 5,
+  "assertion_policy": {
+    "quality_threshold": 4.0
+  },
+  "contested_threshold": 0.6,
   "llm_provider": {
     "provider": "openai_compatible",
     "model_name": "gpt-4o-mini",
@@ -41,9 +45,7 @@
       }
     }
   ],
-  "assertions": {
-    "default": {
-      "checks": [
+  "global_assertions": [
     {
       "name": "mentions OpenJury",
       "type": "contains",
@@ -55,7 +57,5 @@
       "value": "Internal Server Error",
       "case_sensitive": false
     }
-      ]
-    }
-  }
+  ]
 }

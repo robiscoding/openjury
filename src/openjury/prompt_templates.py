@@ -4,7 +4,6 @@ from openjury.config import AgentResponse, CriterionConfig, parse_rubric_key
 
 
 class PromptTemplate:
-
     DEFAULT_SYSTEM_PROMPT = """You are an expert evaluator tasked with judging the quality of an agent's response.
 You will score the response based on specific criteria and provide explanations for each score.
 Use only integer scores within the bounds stated in the evaluation instructions. Rubric ranges are inclusive.
@@ -49,12 +48,12 @@ Be objective, fair, and consistent in your evaluations."""
         references_section = ""
         if ref:
             references_section = (
-                "**Evaluation references (examples for calibration):**\n" f"{ref}\n\n"
+                f"**Evaluation references (examples for calibration):**\n{ref}\n\n"
             )
         case_rules_section = ""
         if rules:
             case_rules_section = (
-                "**Additional rules for this evaluation:**\n" f"{rules}\n\n"
+                f"**Additional rules for this evaluation:**\n{rules}\n\n"
             )
         return references_section, case_rules_section
 
