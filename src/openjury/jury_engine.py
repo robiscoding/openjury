@@ -162,7 +162,18 @@ class OpenJury:
         self, juror: Juror, exc: Exception
     ) -> JurorFailure:
         code = getattr(exc, "code", JurorErrorCode.JUROR_ERROR)
-        return JurorFailure(juror_name=juror.name, code=str(code), message=str(exc))
+        provider_error_info = getattr(exc, "provider_error_info", None)
+        if provider_error_info is None:
+            return JurorFailure(juror_name=juror.name, code=str(code), message=str(exc))
+        return JurorFailure(
+            juror_name=juror.name,
+            code=str(code),
+            message=str(exc),
+            http_status=provider_error_info.http_status,
+            provider_error_code=provider_error_info.provider_error_code,
+            retry_after_seconds=provider_error_info.retry_after_seconds,
+            safe_summary=provider_error_info.safe_summary,
+        )
 
     def run_jurors(
         self,

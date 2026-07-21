@@ -3,6 +3,10 @@
 from __future__ import annotations
 
 from enum import StrEnum
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from openjury.provider_errors import ProviderErrorInfo
 
 
 class EndpointErrorCode(StrEnum):
@@ -56,6 +60,15 @@ class EndpointFetchError(OpenJuryError):
 
 class JurorException(OpenJuryError):
     default_code = JurorErrorCode.JUROR_ERROR
+
+    def __init__(
+        self,
+        message: str,
+        code: str | None = None,
+        provider_error_info: "ProviderErrorInfo | None" = None,
+    ) -> None:
+        super().__init__(message, code=code)
+        self.provider_error_info = provider_error_info
 
 
 class OpenJuryEvaluationError(OpenJuryError):

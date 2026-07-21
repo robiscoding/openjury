@@ -354,6 +354,48 @@ class TestScoreExistingResponse:
         assert len(result.juror_scores) == 1
         assert len(result.juror_failures) == 1
 
+    def test_juror_failure_carries_safe_summary_not_raw_body(
+        self, mock_juror_class, sample_jury_config
+    ):
+        from openjury.errors import JurorErrorCode, JurorException
+        from openjury.provider_errors import ProviderErrorInfo
+
+        ok = MagicMock()
+        ok.name = "Juror A"
+        ok.config.weight = 1.0
+        ok.evaluate.return_value = _score("Juror A")
+
+        bad = MagicMock()
+        bad.name = "Juror B"
+        bad.config.weight = 1.0
+        bad.evaluate.side_effect = JurorException(
+            "Juror Juror B failed after 1 attempts. Last error: Error code: 429 - "
+            "{'error': {'user_id': 'user_abc123'}}",
+            code=JurorErrorCode.JUROR_PROVIDER_ERROR,
+            provider_error_info=ProviderErrorInfo(
+                http_status=429,
+                provider_error_code="rate_limit_exceeded",
+                retry_after_seconds=15,
+                safe_summary="Provider error 429 (rate_limit_exceeded). Retry after 15s.",
+            ),
+        )
+
+        mock_juror_class.side_effect = [ok, bad]
+
+        jury = OpenJury(sample_jury_config)
+        result = jury.score_existing_response("Q?", AgentResponse(content="answer"))
+
+        failure = result.juror_failures[0]
+        assert failure.http_status == 429
+        assert failure.provider_error_code == "rate_limit_exceeded"
+        assert failure.retry_after_seconds == 15
+        assert failure.safe_summary == (
+            "Provider error 429 (rate_limit_exceeded). Retry after 15s."
+        )
+        assert "user_abc123" not in failure.safe_summary
+        # message keeps the full raw string for back-compat/debugging.
+        assert "user_abc123" in failure.message
+
     def test_all_jurors_failed_raises(self, mock_juror_class, sample_jury_config):
         from openjury.errors import EvaluationErrorCode
         from openjury.jury_engine import OpenJuryEvaluationError
