@@ -68,6 +68,12 @@ from openjury.output_format import (
     juror_score_to_dict,
     serialize_eval_result,
 )
+from openjury.provider_errors import (
+    ProviderErrorInfo,
+    normalize_anthropic_error,
+    normalize_openai_error,
+    normalize_provider_error,
+)
 from openjury.scoring import (
     ConsistencyResult,
     JurorScore,
@@ -76,7 +82,7 @@ from openjury.scoring import (
     ScoringFunction,
 )
 
-__version__ = "0.5.0"
+__version__ = "0.6.0"
 __all__ = [
     # Core engine
     "OpenJury",
@@ -121,6 +127,11 @@ __all__ = [
     "EvalItemStatus",
     "ErrorStage",
     "classify_item_error",
+    # Provider error normalization
+    "ProviderErrorInfo",
+    "normalize_provider_error",
+    "normalize_openai_error",
+    "normalize_anthropic_error",
     # Batch summary
     "BatchEvalResult",
     "BatchRunSummary",

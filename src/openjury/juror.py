@@ -18,6 +18,7 @@ from openjury.env import expand_env_vars
 from openjury.errors import JurorErrorCode, JurorException
 from openjury.logger import logger
 from openjury.prompt_templates import PromptTemplate
+from openjury.provider_errors import normalize_provider_error
 from openjury.scoring import JurorScore
 
 __all__ = ["Juror", "JurorException"]
@@ -73,16 +74,19 @@ def _is_transient_provider_error(exc: Exception) -> bool:
     except ImportError:
         pass
 
-    status_code = getattr(exc, "status_code", None)
-    if status_code in _TRANSIENT_HTTP_STATUS_CODES:
-        return True
+    status_code = normalize_provider_error(exc).http_status
+    if status_code is None:
+        status_code = getattr(exc, "status_code", None)
+    if status_code is None:
+        response = getattr(exc, "response", None)
+        if response is not None:
+            status_code = getattr(response, "status_code", None)
 
-    response = getattr(exc, "response", None)
-    if response is not None:
-        response_status = getattr(response, "status_code", None)
-        if response_status in _TRANSIENT_HTTP_STATUS_CODES:
-            return True
+    if status_code is not None:
+        return status_code in _TRANSIENT_HTTP_STATUS_CODES
 
+    # Structured attributes weren't available on this exception at all — fall
+    # back to substring-matching the stringified error as a last resort.
     message = str(exc).lower()
     transient_markers = (
         "429",
@@ -307,8 +311,16 @@ class Juror:
         if isinstance(last_error, JurorException):
             code = JurorErrorCode(last_error.code)
 
+        provider_error_info = None
+        if last_error is not None:
+            if isinstance(last_error, JurorException):
+                provider_error_info = last_error.provider_error_info
+            else:
+                provider_error_info = normalize_provider_error(last_error)
+
         raise JurorException(
             f"Juror {self.name} failed after {max_retries} attempts. "
             f"Last error: {last_error}",
             code=code,
+            provider_error_info=provider_error_info,
         )

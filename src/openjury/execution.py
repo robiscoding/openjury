@@ -109,6 +109,10 @@ class JurorFailure:
     juror_name: str
     code: str
     message: str
+    http_status: int | None = None
+    provider_error_code: str | None = None
+    retry_after_seconds: float | None = None
+    safe_summary: str | None = None
 
 
 @dataclass
