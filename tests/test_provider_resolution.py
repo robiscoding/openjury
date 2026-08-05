@@ -5,8 +5,13 @@ from unittest.mock import MagicMock, patch
 import pytest
 from pydantic import ValidationError
 
-from openjury.config import (JurorConfig, JurorProvider, JuryConfig,
-                             LLMProviderConfig, resolve_juror_llm_config)
+from openjury.config import (
+    JurorConfig,
+    JurorProvider,
+    JuryConfig,
+    LLMProviderConfig,
+    resolve_juror_llm_config,
+)
 from openjury.env import ConfigurationError, expand_env_vars
 from openjury.juror import Juror
 

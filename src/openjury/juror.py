@@ -6,9 +6,14 @@ from typing import Any, Dict, List, Optional
 
 from openai import OpenAI
 
-from openjury.config import (AgentResponse, CriterionConfig, JurorConfig,
-                             JurorProvider, LLMProviderConfig,
-                             resolve_juror_llm_config)
+from openjury.config import (
+    AgentResponse,
+    CriterionConfig,
+    JurorConfig,
+    JurorProvider,
+    LLMProviderConfig,
+    resolve_juror_llm_config,
+)
 from openjury.env import expand_env_vars
 from openjury.errors import JurorErrorCode, JurorException
 from openjury.logger import logger
