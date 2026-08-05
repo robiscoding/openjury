@@ -35,7 +35,8 @@ Copy [`examples/provider_configs/openrouter_multi_model.json`](../examples/provi
 }
 ```
 
-Each juror with a different model needs a full override bundle.
+Each juror with a different model needs a full override bundle — except
+`extra_body`, which can be set on a juror on its own.
 
 ## Environment
 
@@ -43,12 +44,38 @@ Each juror with a different model needs a full override bundle.
 export OPENROUTER_API_KEY="sk-or-..."
 ```
 
+## Routing, price caps, and cost reporting
+
+Add an `extra_body` block to have OpenRouter pick the upstream provider and fail
+over on a 429 instead of failing the juror:
+
+```json
+"extra_body": {
+  "provider": {
+    "sort": "price",
+    "allow_fallbacks": true,
+    "max_price": { "prompt": 0.20, "completion": 0.60 },
+    "data_collection": "deny"
+  },
+  "usage": { "include": true }
+}
+```
+
+- `sort: "price"` + `allow_fallbacks` — cheapest upstream first, next one on a 429
+- `max_price` — a hard per-request ceiling in $/M tokens, so a routing change can't quietly cost more
+- `usage.include` — OpenRouter returns its own charge, which lands on `JurorScore.usage.cost`
+
+`usage.model` records the model that actually served each call, which is worth
+persisting: behind fallbacks it is not always the one you asked for.
+
 ## Cost tips
 
 - Use smaller models for jurors; reserve larger models for your agent under test
 - Set low `temperature` (0.0–0.2) to reduce retries from parse failures
 - Start with 2 jurors; add more only if `juror_agreement` is low
+- Read `JurorScore.usage` instead of estimating; failed jurors report their spend on `JurorFailure.usage` too
 
 ## Related
 
 - [examples/provider_configs/](../examples/provider_configs/)
+- [Provider configuration](../docs/provider-config.md#provider-specific-request-fields-extra_body)

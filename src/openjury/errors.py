@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from openjury.provider_errors import ProviderErrorInfo
+    from openjury.scoring import TokenUsage
 
 
 class EndpointErrorCode(StrEnum):
@@ -66,9 +67,11 @@ class JurorException(OpenJuryError):
         message: str,
         code: str | None = None,
         provider_error_info: "ProviderErrorInfo | None" = None,
+        usage: "TokenUsage | None" = None,
     ) -> None:
         super().__init__(message, code=code)
         self.provider_error_info = provider_error_info
+        self.usage = usage
 
 
 class OpenJuryEvaluationError(OpenJuryError):

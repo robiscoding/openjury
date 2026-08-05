@@ -58,6 +58,14 @@ If **all** jurors fail → `OpenJuryEvaluationError`.
 
 Each `JurorFailure.message` is the full error string, which for LLM provider errors can embed the raw upstream response body (OpenRouter, etc.) — useful for logs, but not safe to show end users since providers can add fields you didn't anticipate. When a provider error was recognized (`openai`/`anthropic` SDK exceptions today), `JurorFailure` also carries `http_status`, `provider_error_code`, `retry_after_seconds`, and `safe_summary` — a short string built only from those allowlisted fields. Prefer `safe_summary` over `message` for any user-facing surface; these fields are `None` when the failure didn't come from a recognized provider exception.
 
+`JurorFailure.usage` carries the tokens a failed juror still spent. A call that reached the provider and returned something unusable (unparseable JSON, missing criteria) was billed like any other; those tokens are reported rather than dropped. It is `None` when no attempt got a response back.
+
+### Juror retries
+
+Juror calls retry up to `max_retries` times, but only for transient provider errors (timeouts, 408/429/5xx). Parse errors and missing criteria are not retried — the same prompt would produce the same bad output.
+
+Delay between attempts is exponential backoff with jitter, **unless** the provider said when to come back: when a recognized provider error carries `retry_after_seconds`, that value is used instead, capped at 30s. Retrying before a rate limit resets just spends another request against it.
+
 ### Endpoint failures (fail-fast)
 
 `EndpointFetchError` aborts the evaluation. Endpoint fetching has **no retry loop** (unlike juror calls which respect `max_retries`).

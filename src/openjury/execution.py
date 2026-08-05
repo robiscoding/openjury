@@ -15,6 +15,7 @@ from openjury.errors import (
     OpenJuryError,
     OpenJuryEvaluationError,
 )
+from openjury.scoring import TokenUsage
 
 if TYPE_CHECKING:
     from openjury.endpoint_fetcher import AgentEndpoint
@@ -113,6 +114,7 @@ class JurorFailure:
     provider_error_code: str | None = None
     retry_after_seconds: float | None = None
     safe_summary: str | None = None
+    usage: TokenUsage | None = None
 
 
 @dataclass

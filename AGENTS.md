@@ -36,7 +36,7 @@ Practical guide for AI coding agents working in this repository. **Repo-specific
 - **Provider resolution:** `resolve_juror_llm_config(juror, jury_llm_provider)` in `config.py` — jurors either inherit the jury-level `llm_provider` or fully override it by setting `model_name + api_key + provider` together on `JurorConfig`. Partial overrides are rejected at validation time.
 - **Endpoint fetching:** `endpoint_fetcher.py` — `fetch_agent_response()`, `AgentEndpoint`, SSE streaming with limits/metadata, `${VAR}` env interpolation, `{prompt}`/`{ground_truth}` template substitution. Called inside `evaluate()` before juror scoring.
 - **Execution:** `OpenJury` (`jury_engine.py`) constructs `Juror` instances. Public methods: `evaluate()`, `score_existing_response()`, `evaluate_items()`, `run_jurors()`, `score_batch()`. Juror concurrency via `ExecutionOptions.max_juror_workers`; item concurrency via `max_item_workers`. Outbound calls share `ExecutionOptions.outbound_slot()` semaphore.
-- **LLM boundary:** `Juror` builds prompts via `PromptTemplate` (`prompt_templates.py`), invokes the appropriate LLM (`ChatOpenAI` or `ChatAnthropic`), parses JSON (with regex fallback) into per-criterion scores + explanations (`juror.py`).
+- **LLM boundary:** `Juror` builds prompts via `PromptTemplate` (`prompt_templates.py`), invokes the appropriate LLM (`ChatOpenAI` or `ChatAnthropic`), parses JSON (with regex fallback) into per-criterion scores + explanations (`juror.py`). `_call_llm` returns `(text, TokenUsage | None)`; usage rides on `JurorScore.usage` on success and `JurorFailure.usage` when a completed-but-unusable call still cost tokens.
 - **Scoring:** `ScoreAggregator.compute_all` (`scoring.py`) produces `ScoredMetrics` — `weighted_mean`, `mean`, `median`, `harmonic_mean`, `weakest_link`, `juror_agreement`, optional `custom`. All values are on the `score_scale` axis.
 - **Inline datasets and assertions:** `JuryConfig.dataset` is an array of JSON row objects (`id`, `input`, optional `ground_truth`, `assertion_profile_ids`, `variables`, inline `assertions`). `JuryConfig.global_assertions` applies to every item; `JuryConfig.assertion_profiles` holds reusable `AssertionProfileConfig` objects keyed by ID. Resolution via `assertion_resolution.resolve_item_assertions()`. `assertions.py` evaluates checks and computes their weighted pass rate; assertions never alter `composite_score`.
 - **Consistency audit:** When `num_trials > 1`, `evaluate()` reruns the agent N times and calls `ScoreAggregator.compute_consistency` to produce a `ConsistencyResult` (std, mean, min, max, interpretation). Quality score always comes from trial 1.
@@ -110,9 +110,11 @@ Practical guide for AI coding agents working in this repository. **Repo-specific
 
 `LLMProviderConfig` is required on `JuryConfig` (as `llm_provider`) unless every juror fully overrides with its own `model_name + api_key + provider`. Both `api_key` and `base_url` support `${ENV_VAR}` interpolation expanded at `Juror` init time.
 
+`extra_body` on `LLMProviderConfig` / `JurorConfig` is forwarded verbatim into every juror request (OpenRouter routing blocks, `usage.include`, etc). It is the one field outside the all-or-nothing juror override rule: a juror may set it alone and inherit everything else, in which case it replaces rather than merges with the jury-level value.
+
 `JurorProvider` enum values:
 - `"openai_compatible"` — works with OpenAI, OpenRouter, xAI, Gemini, Ollama, vLLM, LiteLLM, or any OpenAI-compatible endpoint. Uses `ChatOpenAI`.
-- `"anthropic"` — Anthropic API directly. Requires `pip install openjury[anthropic]`. Uses `ChatAnthropic`. No `base_url`.
+- `"anthropic"` — Anthropic API directly. Requires `pip install openjury[anthropic]`. Uses `ChatAnthropic`. `base_url` is supported, for gateways speaking the Anthropic wire format.
 
 See `examples/provider_configs/` for ready-to-use configs for OpenAI, OpenRouter, Ollama, mixed-provider juries, self-hosted gateways, and per-juror overrides.
 

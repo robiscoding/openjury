@@ -1,0 +1,57 @@
+{
+  "name": "OpenRouter Routed Jury",
+  "description": "OpenRouter with provider routing turned on: cheapest upstream first, automatic failover on 429 instead of a failed juror, a hard per-request price ceiling, and cost reported back on JurorScore.usage.",
+  "score_scale": 5,
+  "llm_provider": {
+    "provider": "openai_compatible",
+    "model_name": "openai/gpt-oss-20b",
+    "api_key": "${OPENROUTER_API_KEY}",
+    "base_url": "https://openrouter.ai/api/v1",
+    "extra_body": {
+      "provider": {
+        "sort": "price",
+        "allow_fallbacks": true,
+        "max_price": { "prompt": 0.2, "completion": 0.6 },
+        "data_collection": "deny"
+      },
+      "usage": { "include": true }
+    }
+  },
+  "jurors": [
+    {
+      "name": "Primary Judge",
+      "temperature": 0.1,
+      "weight": 1.0
+    },
+    {
+      "name": "Secondary Judge",
+      "temperature": 0.1,
+      "weight": 1.0
+    },
+    {
+      "name": "Throughput Judge",
+      "temperature": 0.1,
+      "weight": 1.0,
+      "extra_body": {
+        "provider": {
+          "sort": "throughput",
+          "allow_fallbacks": true,
+          "data_collection": "deny"
+        },
+        "usage": { "include": true }
+      }
+    }
+  ],
+  "criteria": [
+    {
+      "name": "helpfulness",
+      "description": "Does the response resolve the user's request?",
+      "weight": 1.0
+    },
+    {
+      "name": "accuracy",
+      "description": "Is the information correct?",
+      "weight": 1.0
+    }
+  ]
+}

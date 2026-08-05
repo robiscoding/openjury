@@ -34,7 +34,8 @@ Machine-readable schema: [config.schema.json](config.schema.json) (regenerate wi
 | `provider` | yes | `"openai_compatible"` or `"anthropic"` |
 | `model_name` | yes | Model identifier |
 | `api_key` | yes | Supports `${ENV_VAR}` |
-| `base_url` | no | For non-OpenAI compatible endpoints |
+| `base_url` | no | Endpoint override; works for `anthropic` gateways too |
+| `extra_body` | no | Provider-specific request fields, forwarded verbatim |
 
 ## `criteria[]`
 
@@ -57,6 +58,7 @@ Machine-readable schema: [config.schema.json](config.schema.json) (regenerate wi
 | `api_key` | override | `null` | Must set with `model_name` + `provider` |
 | `provider` | override | `null` | Must set with `model_name` + `api_key` |
 | `base_url` | no | `null` | Only when fully overriding |
+| `extra_body` | no | `null` | Provider-specific request fields; settable on its own |
 
 ## Valid examples
 

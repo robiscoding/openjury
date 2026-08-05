@@ -351,8 +351,22 @@
             }
           ],
           "default": null,
-          "description": "Optional base URL when this juror fully overrides llm_provider. Supports ${ENV_VAR} interpolation. Not used for anthropic.",
+          "description": "Optional base URL when this juror fully overrides llm_provider. Supports ${ENV_VAR} interpolation. Applies to anthropic as well.",
           "title": "Base Url"
+        },
+        "extra_body": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Provider-specific request body fields for this juror's calls. Unlike model_name/api_key/provider this is not part of the all-or-nothing override: setting it alone replaces the jury-level extra_body while inheriting everything else.",
+          "title": "Extra Body"
         },
         "system_prompt": {
           "anyOf": [
@@ -423,8 +437,22 @@
             }
           ],
           "default": null,
-          "description": "Optional base URL for openai_compatible providers. Supports ${ENV_VAR} interpolation. Not used for anthropic.",
+          "description": "Optional base URL for the provider endpoint. Supports ${ENV_VAR} interpolation. Works for anthropic too, for gateways and proxies that speak the Anthropic wire format.",
           "title": "Base Url"
+        },
+        "extra_body": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Provider-specific request body fields merged into every juror call (e.g. OpenRouter 'provider' routing preferences, or {'usage': {'include': true}} to have cost returned). Forwarded verbatim; OpenJury does not interpret or validate these keys.",
+          "title": "Extra Body"
         }
       },
       "required": [
