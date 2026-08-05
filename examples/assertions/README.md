@@ -95,9 +95,9 @@ Normal `OpenJury.evaluate()` and `score_existing_response()` results expose:
 for assertion in result.assertion_results:
     print(assertion.name, assertion.passed, assertion.detail)
 
-print(result.assertion_score)     # weighted pass rate, 0–1
-print(result.assertions_passed)   # every required assertion passed
-print(result.passed)              # required + assertion + quality thresholds
+print(result.assertion_score)  # weighted pass rate, 0–1
+print(result.assertions_passed)  # every required assertion passed
+print(result.passed)  # required + assertion + quality thresholds
 ```
 
 Each `TrialResult` also has its own `assertion_results`, which matters when

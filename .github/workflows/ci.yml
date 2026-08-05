@@ -31,7 +31,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          uv pip install -e ".[dev]"
+          uv sync --locked --extra dev
 
       - name: Run linting
         run: make lint
@@ -59,7 +59,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          uv pip install -e ".[dev]"
+          uv sync --locked --extra dev
 
       - name: Build distribution
         run: make dist

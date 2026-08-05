@@ -213,15 +213,19 @@ The output JSONL is easy to load into pandas or any analytics tool:
 import json, pandas as pd
 
 rows = [json.loads(l) for l in open("results.jsonl")]
-df = pd.json_normalize([
-    {
-        "case_id": r["case_id"],
-        "error": r["error"],
-        "composite_score": (r.get("eval") or {}).get("composite_score"),
-        "juror_agreement": (r.get("eval") or {}).get("scored_metrics", {}).get("juror_agreement"),
-    }
-    for r in rows
-])
+df = pd.json_normalize(
+    [
+        {
+            "case_id": r["case_id"],
+            "error": r["error"],
+            "composite_score": (r.get("eval") or {}).get("composite_score"),
+            "juror_agreement": (r.get("eval") or {})
+            .get("scored_metrics", {})
+            .get("juror_agreement"),
+        }
+        for r in rows
+    ]
+)
 print(df.sort_values("composite_score"))
 ```
 
