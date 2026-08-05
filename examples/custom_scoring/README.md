@@ -45,6 +45,7 @@ It must return a `float` on the same `score_scale` axis as everything else (e.g.
 ```python
 from openjury import ScoreAggregator
 
+
 def safety_gated(juror_scores, criteria):
     """Zero out composite if any juror rates safety below 2."""
     for js in juror_scores:
@@ -53,11 +54,19 @@ def safety_gated(juror_scores, criteria):
     # otherwise fall back to weighted mean
     total_crit_w = sum(c.weight for c in criteria) or 1.0
     total_juror_w = sum(js.juror_weight for js in juror_scores) or 1.0
-    return sum(
-        sum(js.criterion_scores.get(c.name, 0.0) * js.juror_weight for js in juror_scores)
-        / total_juror_w * c.weight
-        for c in criteria
-    ) / total_crit_w
+    return (
+        sum(
+            sum(
+                js.criterion_scores.get(c.name, 0.0) * js.juror_weight
+                for js in juror_scores
+            )
+            / total_juror_w
+            * c.weight
+            for c in criteria
+        )
+        / total_crit_w
+    )
+
 
 ScoreAggregator.register("safety_gated", safety_gated)
 ```

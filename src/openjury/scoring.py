@@ -12,6 +12,75 @@ from openjury.config import CriterionConfig
 ScoringFunction = Callable[[List["JurorScore"], List[CriterionConfig]], float]
 
 
+def _add_optional(left: Optional[int], right: Optional[int]) -> Optional[int]:
+    if left is None:
+        return right
+    if right is None:
+        return left
+    return left + right
+
+
+def _add_optional_float(
+    left: Optional[float], right: Optional[float]
+) -> Optional[float]:
+    if left is None:
+        return right
+    if right is None:
+        return left
+    return left + right
+
+
+@dataclass
+class TokenUsage:
+    """Token counts (and optional upstream cost) reported by a provider.
+
+    Every field is optional because providers differ in what they report and
+    some OpenAI-compatible gateways omit ``usage`` entirely. ``cost`` is only
+    populated when the provider returns it (OpenRouter does when the request
+    asks for it via ``extra_body={"usage": {"include": True}}``); it is the
+    provider's own figure in USD, not something OpenJury computes.
+    """
+
+    prompt_tokens: Optional[int] = None
+    completion_tokens: Optional[int] = None
+    total_tokens: Optional[int] = None
+    cached_tokens: Optional[int] = None
+    cost: Optional[float] = None
+    model: Optional[str] = None
+
+    def is_empty(self) -> bool:
+        return all(
+            value is None
+            for value in (
+                self.prompt_tokens,
+                self.completion_tokens,
+                self.total_tokens,
+                self.cached_tokens,
+                self.cost,
+                self.model,
+            )
+        )
+
+    def merge(self, other: Optional["TokenUsage"]) -> "TokenUsage":
+        """Sum two usage records, e.g. across retry attempts of one juror call.
+
+        Token counts and cost add up; ``model`` keeps the most recent non-null
+        value, since a retry may be served by a different upstream model.
+        """
+        if other is None:
+            return self
+        return TokenUsage(
+            prompt_tokens=_add_optional(self.prompt_tokens, other.prompt_tokens),
+            completion_tokens=_add_optional(
+                self.completion_tokens, other.completion_tokens
+            ),
+            total_tokens=_add_optional(self.total_tokens, other.total_tokens),
+            cached_tokens=_add_optional(self.cached_tokens, other.cached_tokens),
+            cost=_add_optional_float(self.cost, other.cost),
+            model=other.model if other.model is not None else self.model,
+        )
+
+
 @dataclass
 class JurorScore:
     juror_name: str
@@ -19,6 +88,7 @@ class JurorScore:
     criterion_scores: Dict[str, float] = field(default_factory=dict)
     criterion_explanations: Dict[str, str] = field(default_factory=dict)
     latency_ms: Optional[int] = None
+    usage: Optional[TokenUsage] = None
 
 
 class ScoredMetrics(BaseModel):

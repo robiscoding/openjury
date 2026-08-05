@@ -103,7 +103,10 @@ summary = aggregate_batch_results(results, score_scale=jury.config.score_scale)
 
 Per-item results now include `quality_passed`, `assertion_threshold_met`,
 `quality_threshold`, `contested`, `lowest_criterion`, `evaluation_duration_ms`,
-and juror `latency_ms` on each `JurorScore`.
+and juror `latency_ms` and `usage` on each `JurorScore`. `usage` is a
+`TokenUsage` with the tokens (and, where the provider reports it, the cost and
+the model that actually served the call) — see
+[provider-config.md](provider-config.md#token-usage).
 
 `score_batch()` is a sequential, fail-fast wrapper over `evaluate_items` with `max_item_workers=1`.
 

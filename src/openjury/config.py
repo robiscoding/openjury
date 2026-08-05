@@ -257,8 +257,18 @@ class LLMProviderConfig(BaseModel):
     base_url: Optional[str] = Field(
         default=None,
         description=(
-            "Optional base URL for openai_compatible providers. "
-            "Supports ${ENV_VAR} interpolation. Not used for anthropic."
+            "Optional base URL for the provider endpoint. Supports ${ENV_VAR} "
+            "interpolation. Works for anthropic too, for gateways and proxies "
+            "that speak the Anthropic wire format."
+        ),
+    )
+    extra_body: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description=(
+            "Provider-specific request body fields merged into every juror call "
+            "(e.g. OpenRouter 'provider' routing preferences, or "
+            "{'usage': {'include': true}} to have cost returned). Forwarded "
+            "verbatim; OpenJury does not interpret or validate these keys."
         ),
     )
 
@@ -289,7 +299,16 @@ class JurorConfig(BaseModel):
         default=None,
         description=(
             "Optional base URL when this juror fully overrides llm_provider. "
-            "Supports ${ENV_VAR} interpolation. Not used for anthropic."
+            "Supports ${ENV_VAR} interpolation. Applies to anthropic as well."
+        ),
+    )
+    extra_body: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description=(
+            "Provider-specific request body fields for this juror's calls. "
+            "Unlike model_name/api_key/provider this is not part of the "
+            "all-or-nothing override: setting it alone replaces the "
+            "jury-level extra_body while inheriting everything else."
         ),
     )
     system_prompt: Optional[str] = Field(
@@ -555,6 +574,11 @@ def resolve_juror_llm_config(
 
     Jurors either inherit the full jury-level llm_provider or override it by setting
     model_name, api_key, and provider together. Partial overrides are invalid.
+
+    ``extra_body`` sits outside that all-or-nothing rule: a juror may set it on
+    its own to attach provider-specific request fields while still inheriting
+    the jury-level credentials. When set it replaces (does not merge with) the
+    jury-level ``extra_body``.
     """
     from openjury.env import ConfigurationError
 
@@ -568,6 +592,7 @@ def resolve_juror_llm_config(
             model_name=juror.model_name,
             api_key=juror.api_key,
             base_url=juror.base_url,
+            extra_body=juror.extra_body,
         )
 
     if jury_llm_provider is None:
@@ -576,5 +601,8 @@ def resolve_juror_llm_config(
             "Set llm_provider on JuryConfig or provide model_name, api_key, and "
             "provider on the juror."
         )
+
+    if juror.extra_body is not None:
+        return jury_llm_provider.model_copy(update={"extra_body": juror.extra_body})
 
     return jury_llm_provider

@@ -21,6 +21,7 @@ Export the env vars listed in the table below before loading configs or running 
 | [`openai_direct.json`](openai_direct.json) | You have an OpenAI API key and want the simplest setup |
 | [`openrouter.json`](openrouter.json) | One API key, access to many models via OpenRouter |
 | [`openrouter_multi_model.json`](openrouter_multi_model.json) | Diverse jury — different models per juror, all via OpenRouter |
+| [`openrouter_routed.json`](openrouter_routed.json) | Provider routing on: 429 failover, price ceiling, cost reported back |
 | [`mixed_providers.json`](mixed_providers.json) | GPT jurors on OpenAI + one native Claude juror (`pip install openjury[anthropic]`) |
 | [`ollama_local.json`](ollama_local.json) | Local dev — jurors call Ollama on your machine |
 | [`self_hosted_gateway.json`](self_hosted_gateway.json) | Corporate proxy (LiteLLM, vLLM, Azure-style gateway) in front of models |
@@ -31,7 +32,7 @@ Export the env vars listed in the table below before loading configs or running 
 | Config | Variables |
 |--------|-----------|
 | `openai_direct.json` | `OPENAI_API_KEY` |
-| `openrouter.json`, `openrouter_multi_model.json` | `OPENROUTER_API_KEY` |
+| `openrouter.json`, `openrouter_multi_model.json`, `openrouter_routed.json` | `OPENROUTER_API_KEY` |
 | `mixed_providers.json` | `OPENAI_API_KEY`, `ANTHROPIC_API_KEY` |
 | `ollama_local.json` | none (Ollama ignores the key locally) |
 | `self_hosted_gateway.json` | `LITELLM_API_KEY` (rename to match your gateway) |
@@ -42,6 +43,7 @@ Export the env vars listed in the table below before loading configs or running 
 - **`llm_provider`** on the jury sets the default for all jurors that omit provider fields.
 - To use a **different model or provider** for one juror, set all three flat fields on that juror: `model_name`, `api_key`, and `provider`. Optional `base_url` when needed.
 - Partial overrides (e.g. only `model_name`) are invalid.
+- **`extra_body`** is the exception: a juror can set it alone to attach provider-specific request fields while inheriting credentials. It replaces, not merges with, the jury-level value.
 
 ## Try one
 

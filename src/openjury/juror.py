@@ -19,11 +19,12 @@ from openjury.errors import JurorErrorCode, JurorException
 from openjury.logger import logger
 from openjury.prompt_templates import PromptTemplate
 from openjury.provider_errors import normalize_provider_error
-from openjury.scoring import JurorScore
+from openjury.scoring import JurorScore, TokenUsage
 
 __all__ = ["Juror", "JurorException"]
 
 _TRANSIENT_HTTP_STATUS_CODES = frozenset({408, 429, 500, 502, 503, 504})
+_MAX_RETRY_DELAY_SECONDS = 30.0
 
 
 def _expand_llm_credentials(llm_config: LLMProviderConfig) -> tuple[str, Optional[str]]:
@@ -36,7 +37,7 @@ def _build_openai_client(api_key: str, base_url: Optional[str]) -> OpenAI:
     return OpenAI(api_key=api_key, base_url=base_url, max_retries=0)
 
 
-def _build_anthropic_client(api_key: str) -> Any:
+def _build_anthropic_client(api_key: str, base_url: Optional[str]) -> Any:
     try:
         import anthropic
     except ImportError as exc:
@@ -44,12 +45,104 @@ def _build_anthropic_client(api_key: str) -> Any:
             "anthropic is required for Anthropic jurors. "
             "Install it with: pip install openjury[anthropic]"
         ) from exc
-    return anthropic.Anthropic(api_key=api_key)
+    return anthropic.Anthropic(api_key=api_key, base_url=base_url)
+
+
+def _read_field(source: Any, name: str) -> Any:
+    """Read a field from an SDK response object or a plain dict.
+
+    Gateways that return raw JSON dicts are as common as SDK model objects, and
+    the difference should not decide whether metering data is collected.
+    """
+    if source is None:
+        return None
+    if isinstance(source, dict):
+        return source.get(name)
+    return getattr(source, name, None)
+
+
+def _as_int(value: Any) -> Optional[int]:
+    if isinstance(value, bool):
+        return None
+    return value if isinstance(value, int) else None
+
+
+def _as_float(value: Any) -> Optional[float]:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return float(value)
+
+
+def _as_str(value: Any) -> Optional[str]:
+    return value if isinstance(value, str) and value else None
+
+
+def _openai_token_usage(response: Any) -> Optional[TokenUsage]:
+    """Extract token usage from an OpenAI-compatible chat completion response."""
+    usage_obj = _read_field(response, "usage")
+    details = _read_field(usage_obj, "prompt_tokens_details")
+
+    usage = TokenUsage(
+        prompt_tokens=_as_int(_read_field(usage_obj, "prompt_tokens")),
+        completion_tokens=_as_int(_read_field(usage_obj, "completion_tokens")),
+        total_tokens=_as_int(_read_field(usage_obj, "total_tokens")),
+        cached_tokens=_as_int(_read_field(details, "cached_tokens")),
+        cost=_as_float(_read_field(usage_obj, "cost")),
+        model=_as_str(_read_field(response, "model")),
+    )
+    return None if usage.is_empty() else usage
+
+
+def _anthropic_token_usage(response: Any) -> Optional[TokenUsage]:
+    """Extract token usage from an Anthropic messages response.
+
+    Anthropic reports cache reads separately from ``input_tokens`` rather than
+    as a subset of them, so ``total_tokens`` is summed from the parts.
+    """
+    usage_obj = _read_field(response, "usage")
+
+    prompt_tokens = _as_int(_read_field(usage_obj, "input_tokens"))
+    completion_tokens = _as_int(_read_field(usage_obj, "output_tokens"))
+    cached_tokens = _as_int(_read_field(usage_obj, "cache_read_input_tokens"))
+    cache_write_tokens = _as_int(_read_field(usage_obj, "cache_creation_input_tokens"))
+
+    parts = [
+        value
+        for value in (
+            prompt_tokens,
+            completion_tokens,
+            cached_tokens,
+            cache_write_tokens,
+        )
+        if value is not None
+    ]
+
+    usage = TokenUsage(
+        prompt_tokens=prompt_tokens,
+        completion_tokens=completion_tokens,
+        total_tokens=sum(parts) if parts else None,
+        cached_tokens=cached_tokens,
+        model=_as_str(_read_field(response, "model")),
+    )
+    return None if usage.is_empty() else usage
 
 
 def _retry_backoff_seconds(attempt: int) -> float:
     base = 0.5 * (2**attempt)
-    return min(30.0, base) + random.uniform(0.0, 0.25)
+    return min(_MAX_RETRY_DELAY_SECONDS, base) + random.uniform(0.0, 0.25)
+
+
+def _retry_delay_seconds(attempt: int, exc: Exception) -> float:
+    """Prefer the provider's own retry_after over blind exponential backoff.
+
+    A 429 that says when to come back is worth more than a guess: retrying
+    early just burns another request against the same limit. The value is
+    still capped so one hostile hint cannot stall a juror indefinitely.
+    """
+    retry_after = normalize_provider_error(exc).retry_after_seconds
+    if retry_after is not None and retry_after > 0:
+        return min(_MAX_RETRY_DELAY_SECONDS, retry_after) + random.uniform(0.0, 0.25)
+    return _retry_backoff_seconds(attempt)
 
 
 def _is_transient_provider_error(exc: Exception) -> bool:
@@ -118,7 +211,7 @@ class Juror:
         api_key, base_url = _expand_llm_credentials(llm_config)
 
         if llm_config.provider == JurorProvider.ANTHROPIC:
-            self._llm_client: Any = _build_anthropic_client(api_key)
+            self._llm_client: Any = _build_anthropic_client(api_key, base_url)
         else:
             self._llm_client = _build_openai_client(api_key, base_url)
 
@@ -130,8 +223,18 @@ class Juror:
             f"weight={self.config.weight})"
         )
 
-    def _call_llm(self, system_prompt: str, user_prompt: str) -> str:
-        """Dispatch a single LLM call and return the raw text response."""
+    def _call_llm(
+        self, system_prompt: str, user_prompt: str
+    ) -> tuple[str, Optional[TokenUsage]]:
+        """Dispatch a single LLM call; return the raw text and reported usage.
+
+        Usage is ``None`` when the provider did not report any — it is
+        metering data, never a precondition for scoring.
+        """
+        extra: Dict[str, Any] = {}
+        if self.llm_config.extra_body:
+            extra["extra_body"] = self.llm_config.extra_body
+
         if self.llm_config.provider == JurorProvider.ANTHROPIC:
             response = self._llm_client.messages.create(
                 model=self.llm_config.model_name,
@@ -139,8 +242,9 @@ class Juror:
                 system=system_prompt,
                 messages=[{"role": "user", "content": user_prompt}],
                 temperature=self.config.temperature,
+                **extra,
             )
-            return response.content[0].text
+            return response.content[0].text, _anthropic_token_usage(response)
         else:
             response = self._llm_client.chat.completions.create(
                 model=self.llm_config.model_name,
@@ -149,8 +253,10 @@ class Juror:
                     {"role": "user", "content": user_prompt},
                 ],
                 temperature=self.config.temperature,
+                **extra,
             )
-            return response.choices[0].message.content or ""
+            content = response.choices[0].message.content or ""
+            return content, _openai_token_usage(response)
 
     def _parse_evaluation_response(
         self,
@@ -249,11 +355,15 @@ class Juror:
         )
 
         last_error: Optional[Exception] = None
+        usage: Optional[TokenUsage] = None
         for attempt in range(max_retries):
             try:
                 logger.debug(f"Juror {self.name} evaluation attempt {attempt + 1}")
                 started = time.perf_counter()
-                response_text = self._call_llm(self.system_prompt, evaluation_prompt)
+                response_text, attempt_usage = self._call_llm(
+                    self.system_prompt, evaluation_prompt
+                )
+                usage = attempt_usage if usage is None else usage.merge(attempt_usage)
                 latency_ms = int((time.perf_counter() - started) * 1000)
                 logger.info(f"Juror {self.name} raw response: {response_text[:300]}")
 
@@ -287,6 +397,7 @@ class Juror:
                     criterion_scores=scores,
                     criterion_explanations=explanations,
                     latency_ms=latency_ms,
+                    usage=usage,
                 )
 
             except Exception as e:
@@ -294,7 +405,7 @@ class Juror:
                 logger.warning(f"Juror {self.name} attempt {attempt + 1} failed: {e}")
                 is_last_attempt = attempt == max_retries - 1
                 if not is_last_attempt and _is_transient_provider_error(e):
-                    delay = _retry_backoff_seconds(attempt)
+                    delay = _retry_delay_seconds(attempt, e)
                     logger.info(
                         f"Juror {self.name} retrying in {delay:.2f}s "
                         f"(attempt {attempt + 2}/{max_retries})"
@@ -323,4 +434,5 @@ class Juror:
             f"Last error: {last_error}",
             code=code,
             provider_error_info=provider_error_info,
+            usage=usage,
         )

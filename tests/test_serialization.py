@@ -2,13 +2,14 @@
 
 import json
 
+from openjury.execution import JurorFailure
 from openjury.output_format import (
     AgentEvalResult,
     CriterionEvaluation,
     TrialResult,
     serialize_eval_result,
 )
-from openjury.scoring import JurorScore, ScoredMetrics
+from openjury.scoring import JurorScore, ScoredMetrics, TokenUsage
 
 
 def _sample_result() -> AgentEvalResult:
@@ -94,3 +95,54 @@ def test_serialize_eval_result_includes_trial_juror_scores() -> None:
             "criterion_explanations": {"helpfulness": "Good"},
         }
     ]
+
+
+def _result_with_usage() -> AgentEvalResult:
+    result = _sample_result()
+    usage = TokenUsage(
+        prompt_tokens=1150,
+        completion_tokens=250,
+        total_tokens=1400,
+        cached_tokens=128,
+        cost=0.00027,
+        model="openai/gpt-oss-20b",
+    )
+    result.juror_scores[0].usage = usage
+    result.juror_failures = [
+        JurorFailure(
+            juror_name="Juror B",
+            code="juror_missing_criteria",
+            message="missing scores",
+            usage=TokenUsage(prompt_tokens=1100, completion_tokens=40),
+        )
+    ]
+    return result
+
+
+def test_serialize_eval_result_includes_token_usage() -> None:
+    payload = serialize_eval_result(_result_with_usage())
+    assert payload["juror_scores"][0]["usage"] == {
+        "prompt_tokens": 1150,
+        "completion_tokens": 250,
+        "total_tokens": 1400,
+        "cached_tokens": 128,
+        "cost": 0.00027,
+        "model": "openai/gpt-oss-20b",
+    }
+
+
+def test_serialize_eval_result_includes_failed_juror_usage() -> None:
+    payload = serialize_eval_result(_result_with_usage())
+    failure = payload["juror_failures"][0]
+    assert failure["usage"]["prompt_tokens"] == 1100
+    assert failure["usage"]["completion_tokens"] == 40
+
+
+def test_serialized_usage_stays_json_encodable() -> None:
+    decoded = json.loads(json.dumps(serialize_eval_result(_result_with_usage())))
+    assert decoded["juror_scores"][0]["usage"]["cost"] == 0.00027
+
+
+def test_juror_scores_omit_usage_key_when_unreported() -> None:
+    payload = serialize_eval_result(_sample_result())
+    assert "usage" not in payload["juror_scores"][0]

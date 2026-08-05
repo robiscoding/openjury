@@ -396,6 +396,35 @@ class TestScoreExistingResponse:
         # message keeps the full raw string for back-compat/debugging.
         assert "user_abc123" in failure.message
 
+    def test_juror_failure_carries_tokens_the_failed_call_still_spent(
+        self, mock_juror_class, sample_jury_config
+    ):
+        from openjury.errors import JurorErrorCode, JurorException
+        from openjury.scoring import TokenUsage
+
+        ok = MagicMock()
+        ok.name = "Juror A"
+        ok.config.weight = 1.0
+        ok.evaluate.return_value = _score("Juror A")
+
+        bad = MagicMock()
+        bad.name = "Juror B"
+        bad.config.weight = 1.0
+        bad.evaluate.side_effect = JurorException(
+            "Juror Juror B missing scores for criteria: {'accuracy'}",
+            code=JurorErrorCode.JUROR_MISSING_CRITERIA,
+            usage=TokenUsage(prompt_tokens=1100, completion_tokens=40),
+        )
+
+        mock_juror_class.side_effect = [ok, bad]
+
+        jury = OpenJury(sample_jury_config)
+        result = jury.score_existing_response("Q?", AgentResponse(content="answer"))
+
+        failure = result.juror_failures[0]
+        assert failure.usage.prompt_tokens == 1100
+        assert failure.usage.completion_tokens == 40
+
     def test_all_jurors_failed_raises(self, mock_juror_class, sample_jury_config):
         from openjury.errors import EvaluationErrorCode
         from openjury.jury_engine import OpenJuryEvaluationError

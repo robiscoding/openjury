@@ -10,6 +10,9 @@ Juror LLM credentials are configured in `JuryConfig` — not environment variabl
 
 Partial overrides (e.g. only `model_name`) fail validation at config load time.
 
+`extra_body` is the one exception to rule 2: a juror may set it alone, keeping
+the inherited credentials. It replaces (never merges with) the jury-level value.
+
 ## openai_compatible
 
 Works with OpenAI, OpenRouter, xAI, Gemini, Ollama, vLLM, LiteLLM, and any OpenAI-compatible API.
@@ -60,7 +63,60 @@ Per-juror override:
 }
 ```
 
-`base_url` is not used for Anthropic.
+`base_url` also applies to Anthropic, for gateways and proxies that speak the
+Anthropic wire format. Leave it unset to call the Anthropic API directly.
+
+## Provider-specific request fields (`extra_body`)
+
+`extra_body` is merged into every juror request for that provider and forwarded
+verbatim — OpenJury neither interprets nor validates its keys. Use it for
+features a specific provider offers that are not part of OpenJury's own config.
+
+OpenRouter provider routing and cost reporting:
+
+```json
+"llm_provider": {
+  "provider": "openai_compatible",
+  "model_name": "openai/gpt-oss-20b",
+  "api_key": "${OPENROUTER_API_KEY}",
+  "base_url": "https://openrouter.ai/api/v1",
+  "extra_body": {
+    "provider": {
+      "sort": "price",
+      "allow_fallbacks": true,
+      "max_price": { "prompt": 0.20, "completion": 0.60 },
+      "data_collection": "deny"
+    },
+    "usage": { "include": true }
+  }
+}
+```
+
+That block lets OpenRouter fail over to another upstream on a 429 instead of
+failing the juror, caps the per-request price, and asks for the authoritative
+cost back on the response (see token usage below).
+
+Keys OpenJury sets itself — `model`, `messages`, `temperature`, and Anthropic's
+`max_tokens` and `system` — are not overridable through `extra_body`.
+
+## Token usage
+
+Each `JurorScore` carries an optional `usage: TokenUsage` with whatever the
+provider reported:
+
+| Field | Notes |
+|-------|-------|
+| `prompt_tokens` | Anthropic's `input_tokens`; excludes cache reads |
+| `completion_tokens` | Anthropic's `output_tokens` |
+| `total_tokens` | As reported; summed from parts on Anthropic |
+| `cached_tokens` | OpenAI `prompt_tokens_details.cached_tokens`, Anthropic `cache_read_input_tokens` |
+| `cost` | Only when the provider returns it (OpenRouter, with `usage.include`) |
+| `model` | The model that actually served the call, which a router may change |
+
+Every field is optional — providers differ in what they report, and `usage` is
+`None` when nothing was reported. A `JurorFailure` carries the same field: a
+call that reached the provider and came back unusable was still billed, so
+those tokens are reported rather than dropped.
 
 ## Mixed-provider jury
 

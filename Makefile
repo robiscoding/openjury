@@ -76,7 +76,7 @@ release:
 	@echo "Checking distribution files..."
 	twine check dist/*
 	@echo "Uploading to PyPI..."
-	twine upload dist/*
+	twine upload --verbose dist/*
 
 release-test: clean check dist
 	@echo "Releasing to TestPyPI..."

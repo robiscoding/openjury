@@ -1,3 +1,4 @@
+import dataclasses
 from datetime import datetime
 from typing import Any, Dict, List, Literal, Optional, Union
 
@@ -17,13 +18,13 @@ def juror_score_to_dict(juror_score: JurorScore) -> Dict[str, Any]:
     }
     if juror_score.latency_ms is not None:
         data["latency_ms"] = juror_score.latency_ms
+    if juror_score.usage is not None:
+        data["usage"] = dataclasses.asdict(juror_score.usage)
     return data
 
 
 def serialize_eval_result(result: "AgentEvalResult") -> Dict[str, Any]:
     """Serialize AgentEvalResult to a JSON-compatible dict."""
-    import dataclasses
-
     raw = result.model_dump(mode="json")
     raw["juror_scores"] = [juror_score_to_dict(js) for js in result.juror_scores]
     for i, trial in enumerate(result.trial_results):

@@ -89,6 +89,65 @@ class TestResolveJurorLLMConfig:
         with pytest.raises(ValidationError, match="model_name, api_key, and provider"):
             JurorConfig(name="j1", model_name="gpt-4o")
 
+    def test_inherits_global_extra_body(self):
+        routing = {"provider": {"sort": "price"}}
+        juror = JurorConfig(name="j1")
+        resolved = resolve_juror_llm_config(
+            juror, self._global_provider(extra_body=routing)
+        )
+        assert resolved.extra_body == routing
+
+    def test_juror_extra_body_alone_is_not_a_partial_override(self):
+        juror = JurorConfig(name="j1", extra_body={"provider": {"sort": "throughput"}})
+        resolved = resolve_juror_llm_config(
+            juror, self._global_provider(extra_body={"provider": {"sort": "price"}})
+        )
+        assert resolved.api_key == "global-key"
+        assert resolved.model_name == "gpt-4o-mini"
+        assert resolved.extra_body == {"provider": {"sort": "throughput"}}
+
+    def test_juror_extra_body_replaces_rather_than_merges(self):
+        juror = JurorConfig(name="j1", extra_body={"usage": {"include": True}})
+        resolved = resolve_juror_llm_config(
+            juror,
+            self._global_provider(
+                extra_body={"provider": {"sort": "price"}, "usage": {"include": False}}
+            ),
+        )
+        assert resolved.extra_body == {"usage": {"include": True}}
+
+    def test_inheriting_juror_does_not_mutate_the_shared_global_config(self):
+        shared = self._global_provider(extra_body={"provider": {"sort": "price"}})
+        resolve_juror_llm_config(
+            JurorConfig(name="j1", extra_body={"provider": {"sort": "latency"}}), shared
+        )
+        assert shared.extra_body == {"provider": {"sort": "price"}}
+
+    def test_full_override_carries_its_own_extra_body(self):
+        juror = JurorConfig(
+            name="j1",
+            model_name="gpt-4o",
+            provider=JurorProvider.OPENAI_COMPATIBLE,
+            api_key="own-key",
+            extra_body={"usage": {"include": True}},
+        )
+        resolved = resolve_juror_llm_config(
+            juror, self._global_provider(extra_body={"provider": {"sort": "price"}})
+        )
+        assert resolved.extra_body == {"usage": {"include": True}}
+
+    def test_full_override_without_extra_body_does_not_inherit_it(self):
+        juror = JurorConfig(
+            name="j1",
+            model_name="gpt-4o",
+            provider=JurorProvider.OPENAI_COMPATIBLE,
+            api_key="own-key",
+        )
+        resolved = resolve_juror_llm_config(
+            juror, self._global_provider(extra_body={"provider": {"sort": "price"}})
+        )
+        assert resolved.extra_body is None
+
 
 @patch("openjury.juror.OpenAI")
 class TestOpenAICompatibleJuror:

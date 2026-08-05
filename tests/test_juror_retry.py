@@ -8,7 +8,12 @@ import pytest
 
 from openjury import AgentResponse, Juror
 from openjury.errors import JurorErrorCode
-from openjury.juror import JurorException, _is_transient_provider_error
+from openjury.juror import (
+    _MAX_RETRY_DELAY_SECONDS,
+    JurorException,
+    _is_transient_provider_error,
+    _retry_delay_seconds,
+)
 
 
 def _mock_openai_response(content: str) -> MagicMock:
@@ -152,3 +157,77 @@ def test_juror_exhausted_retries_attaches_safe_provider_error_info(
 
     # The existing full-string message field is untouched for back-compat.
     assert "Last error:" in str(exc_info.value)
+
+
+def _openai_rate_limit_error_with_retry_after(
+    retry_after_seconds,
+) -> openai.RateLimitError:
+    response = httpx.Response(
+        429,
+        request=httpx.Request("POST", "https://openrouter.ai/api/v1/chat/completions"),
+    )
+    body = {
+        "error": {
+            "message": "Provider returned error",
+            "code": 429,
+            "metadata": {"retry_after_seconds": retry_after_seconds},
+        }
+    }
+    return openai.RateLimitError(
+        f"Error code: 429 - {body!r}", response=response, body=body
+    )
+
+
+@patch("openjury.juror.time.sleep")
+@patch("openjury.juror.OpenAI")
+def test_juror_waits_for_provider_supplied_retry_after(
+    mock_openai_class,
+    mock_sleep,
+    sample_jurors,
+    sample_llm_provider,
+    sample_criteria,
+    sample_prompt,
+) -> None:
+    mock_client = MagicMock()
+    ok_response = _mock_openai_response(
+        '{"scores": {"factuality": {"score": 4, "explanation": "ok"}, '
+        '"clarity": {"score": 4, "explanation": "ok"}}}'
+    )
+    mock_client.chat.completions.create.side_effect = [
+        _openai_rate_limit_error(),  # carries retry_after_seconds: 15
+        ok_response,
+    ]
+    mock_openai_class.return_value = mock_client
+
+    juror = Juror(sample_jurors[0], jury_llm_provider=sample_llm_provider)
+    juror.evaluate(
+        prompt=sample_prompt,
+        response=AgentResponse(content="answer", id="r1"),
+        criteria=sample_criteria,
+        max_retries=2,
+    )
+
+    # Blind exponential backoff for attempt 0 would have been ~0.5s; the
+    # provider said 15s, and retrying sooner just spends another request.
+    delay = mock_sleep.call_args.args[0]
+    assert 15.0 <= delay <= 15.25
+
+
+def test_retry_delay_prefers_provider_hint_over_backoff() -> None:
+    delay = _retry_delay_seconds(0, _openai_rate_limit_error())
+    assert 15.0 <= delay <= 15.25
+
+
+def test_retry_delay_caps_a_hostile_retry_after() -> None:
+    delay = _retry_delay_seconds(0, _openai_rate_limit_error_with_retry_after(86400))
+    assert delay <= _MAX_RETRY_DELAY_SECONDS + 0.25
+
+
+def test_retry_delay_falls_back_to_backoff_without_a_hint() -> None:
+    delay = _retry_delay_seconds(3, RuntimeError("connection reset"))
+    assert 4.0 <= delay <= 4.25
+
+
+def test_retry_delay_ignores_a_zero_hint() -> None:
+    delay = _retry_delay_seconds(2, _openai_rate_limit_error_with_retry_after(0))
+    assert 2.0 <= delay <= 2.25

@@ -80,9 +80,10 @@ from openjury.scoring import (
     ScoreAggregator,
     ScoredMetrics,
     ScoringFunction,
+    TokenUsage,
 )
 
-__version__ = "0.6.0"
+__version__ = "0.7.0"
 __all__ = [
     # Core engine
     "OpenJury",
@@ -148,6 +149,7 @@ __all__ = [
     "ScoreAggregator",
     "ScoredMetrics",
     "JurorScore",
+    "TokenUsage",
     "ScoringFunction",
     "ConsistencyResult",
     # Output
