@@ -118,6 +118,14 @@ Every field is optional — providers differ in what they report, and `usage` is
 call that reached the provider and came back unusable was still billed, so
 those tokens are reported rather than dropped.
 
+The agent fetch reports the same `TokenUsage` shape on `FetchMetadata.usage`
+(returned by `fetch_agent_response`, and attached to `AgentEvalResult.fetch_metadata`
+when using `OpenJury`). It is parsed from whatever the agent endpoint's response body
+carries under `usage` — OpenAI-compatible or Anthropic shape, detected automatically —
+including from a trailing usage-only SSE chunk on streaming endpoints (what OpenRouter
+sends when the request body sets `usage: {include: true}`). It is `None` when the
+endpoint reports nothing.
+
 ## Mixed-provider jury
 
 ```json

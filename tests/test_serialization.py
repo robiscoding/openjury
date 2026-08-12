@@ -2,7 +2,7 @@
 
 import json
 
-from openjury.execution import JurorFailure
+from openjury.execution import FetchMetadata, JurorFailure
 from openjury.output_format import (
     AgentEvalResult,
     CriterionEvaluation,
@@ -146,3 +146,28 @@ def test_serialized_usage_stays_json_encodable() -> None:
 def test_juror_scores_omit_usage_key_when_unreported() -> None:
     payload = serialize_eval_result(_sample_result())
     assert "usage" not in payload["juror_scores"][0]
+
+
+def test_serialize_eval_result_includes_fetch_metadata_usage() -> None:
+    result = _sample_result()
+    result.fetch_metadata = FetchMetadata(
+        stream=False,
+        usage=TokenUsage(
+            prompt_tokens=500,
+            completion_tokens=100,
+            cost=0.0005,
+            model="openai/gpt-oss-20b",
+        ),
+    )
+
+    payload = serialize_eval_result(result)
+
+    assert payload["fetch_metadata"]["usage"] == {
+        "prompt_tokens": 500,
+        "completion_tokens": 100,
+        "total_tokens": None,
+        "cached_tokens": None,
+        "cost": 0.0005,
+        "model": "openai/gpt-oss-20b",
+    }
+    json.dumps(payload)

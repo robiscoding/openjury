@@ -97,6 +97,7 @@ class FetchMetadata:
     first_chunk_latency_ms: int | None = None
     total_latency_ms: int | None = None
     accumulated_bytes: int = 0
+    usage: TokenUsage | None = None
 
 
 @dataclass

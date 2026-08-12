@@ -83,7 +83,7 @@ from openjury.scoring import (
     TokenUsage,
 )
 
-__version__ = "0.7.0"
+__version__ = "0.7.1"
 __all__ = [
     # Core engine
     "OpenJury",
