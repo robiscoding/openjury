@@ -26,6 +26,7 @@ from openjury.endpoint_fetcher import (
 )
 from openjury.errors import EndpointErrorCode
 from openjury.execution import ExecutionOptions
+from openjury.scoring import TokenUsage
 
 
 def test_build_request_body_default_no_stream() -> None:
@@ -203,6 +204,81 @@ def test_fetch_response_bad_path() -> None:
             fetch_response(ep, "test")
 
 
+def test_fetch_agent_response_reports_openai_usage() -> None:
+    ep = AgentEndpoint(url="http://localhost:8080/v1/chat/completions")
+    openai_resp = {
+        "choices": [{"message": {"content": "answer"}}],
+        "model": "openai/gpt-oss-20b",
+        "usage": {
+            "prompt_tokens": 1150,
+            "completion_tokens": 250,
+            "total_tokens": 1400,
+            "prompt_tokens_details": {"cached_tokens": 128},
+            "cost": 0.00027,
+        },
+    }
+    with patch("httpx.Client") as mock_client_cls:
+        mock_client = MagicMock()
+        mock_client_cls.return_value.__enter__.return_value = mock_client
+        mock_client.post.return_value = _mock_response(openai_resp)
+
+        result = fetch_agent_response(ep, "q")
+
+    assert result.metadata.usage == TokenUsage(
+        prompt_tokens=1150,
+        completion_tokens=250,
+        total_tokens=1400,
+        cached_tokens=128,
+        cost=0.00027,
+        model="openai/gpt-oss-20b",
+    )
+
+
+def test_fetch_agent_response_reports_anthropic_usage() -> None:
+    ep = AgentEndpoint(
+        url="http://localhost:8080/v1/messages",
+        response_path="content.0.text",
+    )
+    anthropic_resp = {
+        "content": [{"text": "answer"}],
+        "model": "claude-opus-4-5",
+        "usage": {
+            "input_tokens": 1000,
+            "output_tokens": 200,
+            "cache_read_input_tokens": 300,
+            "cache_creation_input_tokens": 50,
+        },
+    }
+    with patch("httpx.Client") as mock_client_cls:
+        mock_client = MagicMock()
+        mock_client_cls.return_value.__enter__.return_value = mock_client
+        mock_client.post.return_value = _mock_response(anthropic_resp)
+
+        result = fetch_agent_response(ep, "q")
+
+    usage = result.metadata.usage
+    assert usage is not None
+    assert usage.prompt_tokens == 1000
+    assert usage.completion_tokens == 200
+    assert usage.cached_tokens == 300
+    assert usage.total_tokens == 1550
+    assert usage.model == "claude-opus-4-5"
+
+
+def test_fetch_agent_response_usage_none_when_unreported() -> None:
+    ep = AgentEndpoint(url="http://localhost:8080/v1")
+    with patch("httpx.Client") as mock_client_cls:
+        mock_client = MagicMock()
+        mock_client_cls.return_value.__enter__.return_value = mock_client
+        mock_client.post.return_value = _mock_response(
+            {"choices": [{"message": {"content": "ok"}}]}
+        )
+
+        result = fetch_agent_response(ep, "q")
+
+    assert result.metadata.usage is None
+
+
 def _sse_lines(chunks: List[str], done: bool = True) -> List[str]:
     lines = [
         f"data: {json.dumps({'choices': [{'delta': {'content': c}}]})}" for c in chunks
@@ -355,6 +431,47 @@ def test_fetch_response_streaming_default_path_auto_switches() -> None:
         candidate = fetch_response(ep, "test")
 
     assert candidate.content == "auto"
+
+
+def test_fetch_agent_response_streaming_trailing_usage_chunk() -> None:
+    """OpenRouter emits a final usage-only chunk (no delta) when usage.include is set."""
+    ep = AgentEndpoint(url="http://localhost:8080/stream", stream=True)
+    lines = [
+        "data: " + json.dumps({"choices": [{"delta": {"content": "Hi"}}]}),
+        "data: "
+        + json.dumps(
+            {
+                "choices": [],
+                "usage": {
+                    "prompt_tokens": 42,
+                    "completion_tokens": 7,
+                    "cost": 0.0001,
+                },
+                "model": "openai/gpt-oss-20b",
+            }
+        ),
+        "data: [DONE]",
+    ]
+    mock_stream_resp = MagicMock()
+    mock_stream_resp.raise_for_status.return_value = None
+    mock_stream_resp.iter_lines.return_value = iter(lines)
+    mock_stream_resp.__enter__ = lambda s: s
+    mock_stream_resp.__exit__ = MagicMock(return_value=False)
+
+    with patch("httpx.Client") as mock_client_cls:
+        mock_client = MagicMock()
+        mock_client_cls.return_value.__enter__.return_value = mock_client
+        mock_client.stream.return_value = mock_stream_resp
+
+        result = fetch_agent_response(ep, "q")
+
+    assert result.response.content == "Hi"
+    assert result.metadata.usage == TokenUsage(
+        prompt_tokens=42,
+        completion_tokens=7,
+        cost=0.0001,
+        model="openai/gpt-oss-20b",
+    )
 
 
 def test_fetch_response_streaming_mid_error() -> None:

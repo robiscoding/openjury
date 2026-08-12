@@ -14,18 +14,12 @@ import httpx
 from pydantic import BaseModel, Field
 
 from openjury.config import AgentResponse
-from openjury.errors import (
-    EndpointErrorCode,
-    EndpointFetchError,
-    OpenJuryEvaluationError,
-)
-from openjury.execution import (
-    ExecutionOptions,
-    FetchMetadata,
-    FetchResult,
-    ProgressEvent,
-    ProgressEventType,
-)
+from openjury.errors import (EndpointErrorCode, EndpointFetchError,
+                             OpenJuryEvaluationError)
+from openjury.execution import (ExecutionOptions, FetchMetadata, FetchResult,
+                                ProgressEvent, ProgressEventType)
+from openjury.scoring import (TokenUsage, anthropic_token_usage,
+                              openai_token_usage)
 
 logger = logging.getLogger(__name__)
 
@@ -170,6 +164,24 @@ def _walk_path(data: Any, path: str) -> str:
     return data
 
 
+def _extract_fetch_usage(data: Any) -> Optional[TokenUsage]:
+    """Detect the agent response's usage shape and parse it.
+
+    Anthropic reports token counts under ``usage.input_tokens``; OpenAI-compatible
+    bodies (including OpenRouter's, which is what most hosted agents use) do not.
+    Bodies with no ``usage`` at all — a custom endpoint that reports nothing —
+    resolve to ``None`` rather than raising.
+    """
+    if not isinstance(data, dict):
+        return None
+    usage_obj = data.get("usage")
+    if not isinstance(usage_obj, dict):
+        return None
+    if "input_tokens" in usage_obj:
+        return anthropic_token_usage(data)
+    return openai_token_usage(data)
+
+
 def _enforce_response_size(content: str, options: ExecutionOptions, alias: str) -> None:
     size = len(content.encode("utf-8"))
     if size > options.max_agent_response_bytes:
@@ -200,9 +212,15 @@ def _collect_sse_stream(
     chunk_count = 0
     first_chunk_latency_ms: int | None = None
     accumulated_bytes = 0
+    usage: TokenUsage | None = None
 
     def process_payload(payload: str) -> Literal["done", "continue"]:
-        nonlocal chunk_count, first_chunk_latency_ms, accumulated_bytes, last_activity
+        nonlocal \
+            chunk_count, \
+            first_chunk_latency_ms, \
+            accumulated_bytes, \
+            last_activity, \
+            usage
 
         if payload == "[DONE]":
             return "done"
@@ -221,6 +239,13 @@ def _collect_sse_stream(
                 f"Malformed SSE event JSON: {exc}",
                 code=EndpointErrorCode.SSE_MALFORMED,
             ) from exc
+
+        # Many LLM gateways emit a final usage-only chunk with
+        # no delta content when the request asked for usage. Capture it here
+        # before the no-delta-content path below returns early and skips it.
+        chunk_usage = _extract_fetch_usage(chunk)
+        if chunk_usage is not None:
+            usage = chunk_usage if usage is None else usage.merge(chunk_usage)
 
         try:
             text = _walk_path(chunk, response_path)
@@ -319,6 +344,7 @@ def _collect_sse_stream(
         first_chunk_latency_ms=first_chunk_latency_ms,
         total_latency_ms=int((time.monotonic() - start) * 1000),
         accumulated_bytes=accumulated_bytes,
+        usage=usage,
     )
     return content, metadata
 
@@ -431,6 +457,7 @@ def fetch_agent_response(
                         stream=False,
                         accumulated_bytes=len(content.encode("utf-8")),
                         total_latency_ms=int((time.monotonic() - start) * 1000),
+                        usage=_extract_fetch_usage(data),
                     )
 
     except EndpointFetchError:

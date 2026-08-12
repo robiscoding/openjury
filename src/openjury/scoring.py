@@ -3,7 +3,7 @@
 import statistics
 import warnings
 from dataclasses import dataclass, field
-from typing import Callable, ClassVar, Dict, List, Optional
+from typing import Any, Callable, ClassVar, Dict, List, Optional
 
 from pydantic import BaseModel
 
@@ -79,6 +79,85 @@ class TokenUsage:
             cost=_add_optional_float(self.cost, other.cost),
             model=other.model if other.model is not None else self.model,
         )
+
+
+def _read_field(source: Any, name: str) -> Any:
+    """Read a field from an SDK response object or a plain dict.
+
+    Gateways that return raw JSON dicts are as common as SDK model objects, and
+    the difference should not decide whether metering data is collected.
+    """
+    if source is None:
+        return None
+    if isinstance(source, dict):
+        return source.get(name)
+    return getattr(source, name, None)
+
+
+def _as_int(value: Any) -> Optional[int]:
+    if isinstance(value, bool):
+        return None
+    return value if isinstance(value, int) else None
+
+
+def _as_float(value: Any) -> Optional[float]:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return float(value)
+
+
+def _as_str(value: Any) -> Optional[str]:
+    return value if isinstance(value, str) and value else None
+
+
+def openai_token_usage(response: Any) -> Optional["TokenUsage"]:
+    """Extract token usage from an OpenAI-compatible chat completion response."""
+    usage_obj = _read_field(response, "usage")
+    details = _read_field(usage_obj, "prompt_tokens_details")
+
+    usage = TokenUsage(
+        prompt_tokens=_as_int(_read_field(usage_obj, "prompt_tokens")),
+        completion_tokens=_as_int(_read_field(usage_obj, "completion_tokens")),
+        total_tokens=_as_int(_read_field(usage_obj, "total_tokens")),
+        cached_tokens=_as_int(_read_field(details, "cached_tokens")),
+        cost=_as_float(_read_field(usage_obj, "cost")),
+        model=_as_str(_read_field(response, "model")),
+    )
+    return None if usage.is_empty() else usage
+
+
+def anthropic_token_usage(response: Any) -> Optional["TokenUsage"]:
+    """Extract token usage from an Anthropic messages response.
+
+    Anthropic reports cache reads separately from ``input_tokens`` rather than
+    as a subset of them, so ``total_tokens`` is summed from the parts.
+    """
+    usage_obj = _read_field(response, "usage")
+
+    prompt_tokens = _as_int(_read_field(usage_obj, "input_tokens"))
+    completion_tokens = _as_int(_read_field(usage_obj, "output_tokens"))
+    cached_tokens = _as_int(_read_field(usage_obj, "cache_read_input_tokens"))
+    cache_write_tokens = _as_int(_read_field(usage_obj, "cache_creation_input_tokens"))
+
+    parts = [
+        value
+        for value in (
+            prompt_tokens,
+            completion_tokens,
+            cached_tokens,
+            cache_write_tokens,
+        )
+        if value is not None
+    ]
+
+    usage = TokenUsage(
+        prompt_tokens=prompt_tokens,
+        completion_tokens=completion_tokens,
+        total_tokens=sum(parts) if parts else None,
+        cached_tokens=cached_tokens,
+        model=_as_str(_read_field(response, "model")),
+    )
+    return None if usage.is_empty() else usage
 
 
 @dataclass
