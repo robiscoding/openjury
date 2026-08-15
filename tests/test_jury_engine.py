@@ -205,6 +205,30 @@ class TestScoreResponse:
         ]
         assert result.assertions_passed is True
 
+    def test_assertion_results_report_the_scope_they_came_from(
+        self, mock_juror_class, mock_fetch, sample_jury_config
+    ):
+        """A result has to be readable without the config that produced it."""
+        mock_resp = self._setup_mocks(mock_juror_class)
+        mock_fetch.return_value = _fetch_result(mock_resp)
+        sample_jury_config.global_assertions = [
+            AssertionConfig(name="global check", type="contains", value="answer")
+        ]
+
+        result = OpenJury(sample_jury_config).evaluate(
+            prompt="Q?",
+            endpoint=AgentEndpoint(url="http://localhost/v1"),
+            assertions=[
+                AssertionConfig(name="case check", type="contains", value="Agent")
+            ],
+        )
+
+        assert [item.scope for item in result.assertion_results] == [
+            "global",
+            "inline",
+        ]
+        assert all(item.profile_id is None for item in result.assertion_results)
+
     def test_explicit_empty_case_assertions_keep_global_assertions(
         self, mock_juror_class, mock_fetch, sample_jury_config
     ):

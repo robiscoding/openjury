@@ -30,6 +30,7 @@ In-repo reference for SDK users and contributors. Start with the track that matc
 | [architecture.md](architecture.md) | Evaluation flow, concurrency, error semantics |
 | [config-schema.md](config-schema.md) | `JuryConfig` JSON fields, valid/invalid examples |
 | [config.schema.json](config.schema.json) | Machine-readable JSON Schema (generated) |
+| [assertion_conformance.json](assertion_conformance.json) | Assertion semantics as `{response, assertion, passed}` triples (generated) |
 | [composable-api.md](composable-api.md) | `evaluate`, `score_existing_response`, `evaluate_items` |
 | [endpoint-config.md](endpoint-config.md) | Agent endpoint fields, streaming, custom shapes |
 | [provider-config.md](provider-config.md) | LLM provider resolution, per-juror overrides |

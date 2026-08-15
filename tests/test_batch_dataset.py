@@ -3,6 +3,8 @@ from pathlib import Path
 
 import pytest
 
+from openjury.assertion_resolution import resolve_item_assertions
+from openjury.assertions import evaluate_assertions, score_assertions
 from openjury.batch_dataset import (
     BatchCase,
     Exemplars,
@@ -331,3 +333,25 @@ def test_prompt_template_supports_zero_based_integer_scores():
     assert "score each 0-5" in text
     assert "integer score from 0 to 5" in text
     assert "Rubric ranges are inclusive" in PromptTemplate.DEFAULT_SYSTEM_PROMPT
+
+
+def test_batch_case_globals_are_not_weighed_twice(sample_jury_config):
+    """The batch path resolves a case, then hands the result back to evaluate()."""
+    data = sample_jury_config.model_dump()
+    data["global_assertions"] = [{"name": "global", "type": "contains", "value": "ok"}]
+    config = JuryConfig.model_validate(data)
+    case = BatchCase(
+        case_id="row-1",
+        prompt="p",
+        assertions=[{"name": "inline", "type": "contains", "value": "missing"}],
+    )
+
+    checks, _, _ = assertion_policy_for_case(case, config)
+    # What OpenJury.evaluate() does with an EvaluationItem's assertions.
+    reresolved, _, _ = resolve_item_assertions(
+        config, profile_ids=[], inline_assertions=checks
+    )
+
+    assert [check.name for check in reresolved] == ["global", "inline"]
+    assertion_score, _ = score_assertions(evaluate_assertions("ok", reresolved))
+    assert assertion_score == 0.5

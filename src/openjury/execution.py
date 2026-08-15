@@ -6,7 +6,17 @@ import threading
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import TYPE_CHECKING, Any, Callable, Dict, Iterator, List, Literal, Optional
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Callable,
+    Dict,
+    Iterator,
+    List,
+    Literal,
+    Optional,
+    Sequence,
+)
 
 from openjury.config import AgentResponse, AssertionConfig
 from openjury.errors import (
@@ -125,7 +135,7 @@ class EvaluationItem:
     prompt: str
     item_id: str | None = None
     ground_truth: str | None = None
-    assertions: List[AssertionConfig] | None = None
+    assertions: Sequence[AssertionConfig] | None = None
     assertion_threshold: float | None = None
     quality_threshold: float | None = None
     metadata: Dict[str, Any] = field(default_factory=dict)

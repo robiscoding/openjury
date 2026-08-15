@@ -2,7 +2,6 @@
     "name": "Self-Hosted Gateway Jury",
     "description": "Corporate setup — all juror LLM calls go through an internal OpenAI-compatible proxy (LiteLLM, vLLM, Azure API Management, etc.). Replace base_url and model_name with your gateway's values.",
     "score_scale": 5,
-    "parallel_execution": true,
     "llm_provider": {
         "provider": "openai_compatible",
         "model_name": "gpt-4o",

@@ -4,7 +4,7 @@ from typing import Any, Dict, List, Literal, Optional, Union
 
 from pydantic import BaseModel, Field
 
-from openjury.config import AssertionType
+from openjury.config import AssertionScope, AssertionType
 from openjury.execution import FetchMetadata, JurorFailure
 from openjury.scoring import ConsistencyResult, JurorScore, ScoredMetrics
 
@@ -52,7 +52,13 @@ class CriterionEvaluation(BaseModel):
 
 
 class AssertionResult(BaseModel):
-    """Result of one deterministic assertion against an agent response."""
+    """Result of one deterministic assertion against an agent response.
+
+    ``scope`` records where the check came from, so results can be aggregated
+    across items without re-reading the config: a check that failed twice means
+    2 of every item when it is global, and 2 of the items it was attached to
+    when it is not.
+    """
 
     name: str
     type: AssertionType
@@ -61,6 +67,17 @@ class AssertionResult(BaseModel):
     detail: str
     required: bool = True
     weight: float = Field(default=1.0, gt=0.0)
+    scope: AssertionScope = Field(
+        default="global",
+        description=(
+            "Where the check came from: 'global' (every item), 'profile' "
+            "(a selected assertion profile), or 'inline' (this item only)"
+        ),
+    )
+    profile_id: Optional[str] = Field(
+        default=None,
+        description="Assertion profile the check came from, when scope is 'profile'",
+    )
 
 
 class TrialResult(BaseModel):
@@ -80,7 +97,20 @@ class TrialResult(BaseModel):
 
 class AgentEvalResult(BaseModel):
     """Primary output of an agent evaluation. Quality score always comes from trial 1.
-    If num_trials > 1, consistency_result is populated with reliability metrics."""
+    If num_trials > 1, consistency_result is populated with reliability metrics.
+
+    Three separate pass flags, and reading only the first one is a bug:
+
+    - ``assertions_passed`` — every check with ``required=True`` passed. Says
+      nothing about ``assertion_threshold``.
+    - ``assertion_threshold_met`` — ``assertion_score`` (the weighted pass rate
+      over all checks, required or not) met the configured
+      ``assertion_threshold``. ``True`` when no threshold is configured.
+    - ``quality_passed`` — ``composite_score`` met the configured
+      ``quality_threshold``. ``True`` when no threshold is configured.
+
+    ``passed`` is the conjunction of all three, and is the flag to gate on.
+    """
 
     jury_name: str
     prompt: str

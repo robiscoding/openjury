@@ -6,6 +6,7 @@ from openjury.config import (
     AssertionPolicyDefaults,
     AssertionProfileConfig,
     JuryConfig,
+    ResolvedAssertion,
 )
 
 
@@ -135,3 +136,88 @@ def test_unknown_profile_id_raises():
     config = _base_config()
     with pytest.raises(ValueError, match="Unknown assertion_profile_ids"):
         resolve_item_assertions(config, profile_ids=["missing"])
+
+
+def test_resolved_checks_carry_their_scope():
+    config = _base_config(
+        global_assertions=[{"name": "global", "type": "contains", "value": "g"}],
+        assertion_profiles={
+            "contract": {
+                "checks": [{"name": "profile", "type": "contains", "value": "p"}]
+            }
+        },
+    )
+    checks, _, _ = resolve_item_assertions(
+        config,
+        profile_ids=["contract"],
+        inline_assertions=[AssertionConfig(name="inline", type="contains", value="i")],
+    )
+    assert [(check.scope, check.profile_id) for check in checks] == [
+        ("global", None),
+        ("profile", "contract"),
+        ("inline", None),
+    ]
+
+
+def test_scope_survives_template_substitution():
+    config = _base_config(
+        assertion_profiles={
+            "order": {
+                "checks": [
+                    {
+                        "name": "order number",
+                        "type": "contains",
+                        "value": "order #{{order_number}}",
+                    }
+                ]
+            }
+        },
+    )
+    checks, _, _ = resolve_item_assertions(
+        config, profile_ids=["order"], variables={"order_number": "12345"}
+    )
+    assert checks[0].value == "order #12345"
+    assert checks[0].scope == "profile"
+    assert checks[0].profile_id == "order"
+
+
+def test_an_already_resolved_check_keeps_its_scope():
+    config = _base_config()
+    resolved = ResolvedAssertion.from_assertion(
+        AssertionConfig(name="contract", type="contains", value="c"),
+        "profile",
+        "contract",
+    )
+    checks, _, _ = resolve_item_assertions(
+        config, profile_ids=[], inline_assertions=[resolved]
+    )
+    assert (checks[0].scope, checks[0].profile_id) == ("profile", "contract")
+
+
+def test_resolution_is_idempotent_for_globals():
+    """Batch callers resolve up front and pass the result back through evaluate()."""
+    config = _base_config(
+        global_assertions=[{"name": "global", "type": "contains", "value": "g"}]
+    )
+    once, _, _ = resolve_item_assertions(config, profile_ids=[])
+    twice, _, _ = resolve_item_assertions(
+        config, profile_ids=[], inline_assertions=once
+    )
+
+    assert [check.name for check in twice] == ["global"]
+    assert twice == once
+
+
+def test_raw_checks_still_supplement_globals():
+    config = _base_config(
+        global_assertions=[{"name": "global", "type": "contains", "value": "g"}]
+    )
+    checks, _, _ = resolve_item_assertions(
+        config,
+        profile_ids=[],
+        inline_assertions=[AssertionConfig(name="inline", type="contains", value="i")],
+    )
+    assert [(check.name, check.scope) for check in checks] == [
+        ("global", "global"),
+        ("inline", "inline"),
+    ]

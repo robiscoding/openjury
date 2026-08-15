@@ -11,7 +11,7 @@ from typing import Any, Iterator, List, Optional
 from pydantic import BaseModel, Field, ValidationError, model_validator
 
 from openjury.assertion_resolution import resolve_item_assertions
-from openjury.config import AssertionConfig, JuryConfig
+from openjury.config import AssertionConfig, JuryConfig, ResolvedAssertion
 
 logger = logging.getLogger(__name__)
 
@@ -156,7 +156,7 @@ def cases_from_config(config: JuryConfig) -> List[BatchCase]:
 
 def assertion_policy_for_case(
     case: BatchCase, config: JuryConfig
-) -> tuple[List[AssertionConfig], Optional[float], Optional[float]]:
+) -> tuple[List[ResolvedAssertion], Optional[float], Optional[float]]:
     """Resolve global, profile, and inline assertions for a batch case."""
     if len(case.assertion_profile_ids) > 1:
         profiles_with_thresholds = [

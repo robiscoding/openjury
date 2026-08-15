@@ -2,9 +2,16 @@ import json
 import re
 import uuid
 from enum import Enum
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Literal, Optional, Union
 
-from pydantic import AliasChoices, BaseModel, Field, field_validator, model_validator
+from pydantic import (
+    AliasChoices,
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_validator,
+    model_validator,
+)
 
 _RUBRIC_KEY_PATTERN = re.compile(r"^\s*(\d+)\s*(?:-\s*(\d+)\s*)?$")
 
@@ -62,6 +69,13 @@ class AssertionType(str, Enum):
 
 
 class AssertionConfig(BaseModel):
+    """One deterministic check applied to an agent response.
+
+    Rejects unknown fields: a misspelled key is a check that would never run.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
     name: str = Field(..., description="Name or identifier for this assertion")
     type: AssertionType = Field(..., description="Type of deterministic assertion")
     value: Union[str, List[str], int] = Field(
@@ -122,8 +136,46 @@ class AssertionConfig(BaseModel):
         return self
 
 
+AssertionScope = Literal["global", "profile", "inline"]
+
+
+class ResolvedAssertion(AssertionConfig):
+    """An assertion tagged with where it came from.
+
+    `resolve_item_assertions` returns these so that a result can say whether a
+    check ran on every item or only on the one it was attached to. Anywhere an
+    `AssertionConfig` is accepted a `ResolvedAssertion` works too.
+    """
+
+    scope: AssertionScope = Field(
+        default="global",
+        description=(
+            "Where this check came from: 'global' (every item), 'profile' "
+            "(a selected assertion profile), or 'inline' (this item only)"
+        ),
+    )
+    profile_id: Optional[str] = Field(
+        default=None,
+        description="Assertion profile this check came from, when scope is 'profile'",
+    )
+
+    @classmethod
+    def from_assertion(
+        cls,
+        assertion: AssertionConfig,
+        scope: AssertionScope,
+        profile_id: Optional[str] = None,
+    ) -> "ResolvedAssertion":
+        """Tag an assertion with its origin, re-tagging one already resolved."""
+        return cls.model_validate(
+            {**assertion.model_dump(), "scope": scope, "profile_id": profile_id}
+        )
+
+
 class AssertionPolicyDefaults(BaseModel):
     """Default pass thresholds applied when no item or profile override is set."""
+
+    model_config = ConfigDict(extra="forbid")
 
     assertion_threshold: Optional[float] = Field(default=None, ge=0.0, le=1.0)
     quality_threshold: Optional[float] = Field(default=None, ge=0.0)
@@ -131,6 +183,8 @@ class AssertionPolicyDefaults(BaseModel):
 
 class AssertionProfileConfig(BaseModel):
     """A reusable group of deterministic checks and optional pass thresholds."""
+
+    model_config = ConfigDict(extra="forbid")
 
     name: Optional[str] = Field(
         default=None,
@@ -145,6 +199,8 @@ class AssertionProfileConfig(BaseModel):
 
 class DatasetItemConfig(BaseModel):
     """One row in an inline config dataset."""
+
+    model_config = ConfigDict(extra="forbid")
 
     id: str = Field(..., min_length=1, description="Stable dataset row identifier")
     input: str = Field(
@@ -172,7 +228,10 @@ class DatasetItemConfig(BaseModel):
         if isinstance(value, dict) and "assertion_profile_ids" not in value:
             profile_id = value.get("assertion_profile_id")
             if profile_id is not None:
-                return {**value, "assertion_profile_ids": [profile_id]}
+                normalized = {k: v for k, v in value.items()}
+                normalized.pop("assertion_profile_id")
+                normalized["assertion_profile_ids"] = [profile_id]
+                return normalized
         return value
 
     @model_validator(mode="after")
@@ -185,6 +244,8 @@ class DatasetItemConfig(BaseModel):
 
 
 class CriterionConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     name: str = Field(..., description="Name of the criterion (free-form string)")
     description: str = Field(
         ..., description="Description of what this criterion evaluates"
@@ -241,6 +302,8 @@ class CriterionConfig(BaseModel):
 
 
 class LLMProviderConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     provider: JurorProvider = Field(
         ...,
         description=(
@@ -274,6 +337,8 @@ class LLMProviderConfig(BaseModel):
 
 
 class JurorConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     name: str = Field(..., description="Name or identifier for this juror")
     model_name: Optional[str] = Field(
         default=None,
@@ -335,6 +400,15 @@ class JurorConfig(BaseModel):
 
 
 class JuryConfig(BaseModel):
+    """Top-level jury configuration.
+
+    Unknown fields are rejected. A config that names a field OpenJury does not
+    model is almost always a typo or a stale key, and silently ignoring it means
+    running an evaluation that checks less than the author asked for.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
     name: str = Field(..., description="Name for this jury configuration")
     description: Optional[str] = Field(
         None, description="Description of what this jury evaluates"
@@ -351,7 +425,11 @@ class JuryConfig(BaseModel):
     )
     global_assertions: List[AssertionConfig] = Field(
         default_factory=list,
-        description="Deterministic checks applied automatically to every dataset item",
+        validation_alias=AliasChoices("global_assertions", "assertions"),
+        description=(
+            "Deterministic checks applied automatically to every dataset item; "
+            "accepts 'assertions' as an input alias"
+        ),
     )
     assertion_profiles: Dict[str, AssertionProfileConfig] = Field(
         default_factory=dict,
@@ -547,6 +625,8 @@ class JuryConfig(BaseModel):
 
 
 class AgentResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     id: str = Field(
         default_factory=lambda: f"response_{uuid.uuid4().hex}",
         description="A unique ID of the response",
