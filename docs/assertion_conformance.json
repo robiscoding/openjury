@@ -1,0 +1,641 @@
+{
+  "schema_version": 1,
+  "generated_by": "scripts/export_assertion_conformance.py",
+  "notes": [
+    "Generated from openjury.assertions.evaluate_assertions; do not edit by hand.",
+    "Regenerate with: python scripts/export_assertion_conformance.py",
+    "Case-insensitive matching uses Python str.casefold(), which is more aggressive than a plain lowercase and is locale-independent.",
+    "min_length and max_length count Unicode code points (Python len()), not UTF-16 code units.",
+    "regex matches the raw response, not the case-normalized one; with case_sensitive=false it applies re.IGNORECASE instead.",
+    "regex patterns are Python re. Cases tagged 'python_re_only' use syntax other dialects reject; a port should skip them and treat regex as advisory rather than claim parity.",
+    "Empty string values are rejected by AssertionConfig validation, so no case here carries one."
+  ],
+  "cases": [
+    {
+      "id": "contains-hit",
+      "description": "Substring present",
+      "tags": [],
+      "response": "The answer is 42.",
+      "assertion": {
+        "name": "contains-hit",
+        "type": "contains",
+        "value": "answer",
+        "case_sensitive": true,
+        "required": true,
+        "weight": 1.0
+      },
+      "passed": true
+    },
+    {
+      "id": "contains-miss",
+      "description": "Substring absent",
+      "tags": [],
+      "response": "The answer is 42.",
+      "assertion": {
+        "name": "contains-miss",
+        "type": "contains",
+        "value": "disclaimer",
+        "case_sensitive": true,
+        "required": true,
+        "weight": 1.0
+      },
+      "passed": false
+    },
+    {
+      "id": "contains-case-sensitive-miss",
+      "description": "Case-sensitive matching does not fold case",
+      "tags": [],
+      "response": "Read the Refund Policy first.",
+      "assertion": {
+        "name": "contains-case-sensitive-miss",
+        "type": "contains",
+        "value": "refund policy",
+        "case_sensitive": true,
+        "required": true,
+        "weight": 1.0
+      },
+      "passed": false
+    },
+    {
+      "id": "contains-case-insensitive-hit",
+      "description": "The same pair matches once case folding is on",
+      "tags": [],
+      "response": "Read the Refund Policy first.",
+      "assertion": {
+        "name": "contains-case-insensitive-hit",
+        "type": "contains",
+        "value": "refund policy",
+        "case_sensitive": false,
+        "required": true,
+        "weight": 1.0
+      },
+      "passed": true
+    },
+    {
+      "id": "contains-casefold-sharp-s",
+      "description": "casefold folds ß to ss; a plain lowercase does not",
+      "tags": [
+        "casefold"
+      ],
+      "response": "Die Straße ist gesperrt.",
+      "assertion": {
+        "name": "contains-casefold-sharp-s",
+        "type": "contains",
+        "value": "STRASSE",
+        "case_sensitive": false,
+        "required": true,
+        "weight": 1.0
+      },
+      "passed": true
+    },
+    {
+      "id": "contains-casefold-ligature",
+      "description": "casefold decomposes the ﬁ ligature; a plain lowercase does not",
+      "tags": [
+        "casefold"
+      ],
+      "response": "The ﬁle is ready.",
+      "assertion": {
+        "name": "contains-casefold-ligature",
+        "type": "contains",
+        "value": "file",
+        "case_sensitive": false,
+        "required": true,
+        "weight": 1.0
+      },
+      "passed": true
+    },
+    {
+      "id": "equals-casefold-final-sigma",
+      "description": "Greek final sigma folds together with sigma",
+      "tags": [
+        "casefold"
+      ],
+      "response": "ΟΔΟΣ",
+      "assertion": {
+        "name": "equals-casefold-final-sigma",
+        "type": "equals",
+        "value": "οδος",
+        "case_sensitive": false,
+        "required": true,
+        "weight": 1.0
+      },
+      "passed": true
+    },
+    {
+      "id": "contains-casefold-turkish-dotless-i",
+      "description": "casefold is locale-independent: dotless ı does not fold with I",
+      "tags": [
+        "casefold",
+        "locale"
+      ],
+      "response": "ırmak kenarı",
+      "assertion": {
+        "name": "contains-casefold-turkish-dotless-i",
+        "type": "contains",
+        "value": "IRMAK",
+        "case_sensitive": false,
+        "required": true,
+        "weight": 1.0
+      },
+      "passed": false
+    },
+    {
+      "id": "contains-casefold-turkish-dotted-i",
+      "description": "casefold turns İ into i plus a combining dot, so 'istanbul' does not match",
+      "tags": [
+        "casefold",
+        "locale"
+      ],
+      "response": "İSTANBUL",
+      "assertion": {
+        "name": "contains-casefold-turkish-dotted-i",
+        "type": "contains",
+        "value": "istanbul",
+        "case_sensitive": false,
+        "required": true,
+        "weight": 1.0
+      },
+      "passed": false
+    },
+    {
+      "id": "not_contains-pass",
+      "description": "Forbidden phrase absent",
+      "tags": [],
+      "response": "Here is a summary of the policy.",
+      "assertion": {
+        "name": "not_contains-pass",
+        "type": "not_contains",
+        "value": "guaranteed returns",
+        "case_sensitive": true,
+        "required": true,
+        "weight": 1.0
+      },
+      "passed": true
+    },
+    {
+      "id": "not_contains-fail",
+      "description": "Forbidden phrase present",
+      "tags": [],
+      "response": "This offers guaranteed returns.",
+      "assertion": {
+        "name": "not_contains-fail",
+        "type": "not_contains",
+        "value": "guaranteed returns",
+        "case_sensitive": true,
+        "required": true,
+        "weight": 1.0
+      },
+      "passed": false
+    },
+    {
+      "id": "equals-exact",
+      "description": "Whole response equals the value",
+      "tags": [],
+      "response": "APPROVED",
+      "assertion": {
+        "name": "equals-exact",
+        "type": "equals",
+        "value": "APPROVED",
+        "case_sensitive": true,
+        "required": true,
+        "weight": 1.0
+      },
+      "passed": true
+    },
+    {
+      "id": "equals-trailing-whitespace",
+      "description": "equals does not trim; trailing whitespace fails",
+      "tags": [
+        "whitespace"
+      ],
+      "response": "APPROVED ",
+      "assertion": {
+        "name": "equals-trailing-whitespace",
+        "type": "equals",
+        "value": "APPROVED",
+        "case_sensitive": true,
+        "required": true,
+        "weight": 1.0
+      },
+      "passed": false
+    },
+    {
+      "id": "not_equals-pass",
+      "description": "Whole response differs from the value",
+      "tags": [],
+      "response": "APPROVED WITH NOTES",
+      "assertion": {
+        "name": "not_equals-pass",
+        "type": "not_equals",
+        "value": "APPROVED",
+        "case_sensitive": true,
+        "required": true,
+        "weight": 1.0
+      },
+      "passed": true
+    },
+    {
+      "id": "not_equals-fail",
+      "description": "Whole response equals the value",
+      "tags": [],
+      "response": "APPROVED",
+      "assertion": {
+        "name": "not_equals-fail",
+        "type": "not_equals",
+        "value": "APPROVED",
+        "case_sensitive": true,
+        "required": true,
+        "weight": 1.0
+      },
+      "passed": false
+    },
+    {
+      "id": "starts_with-pass",
+      "description": "Response opens with the value",
+      "tags": [],
+      "response": "Dear customer, your order shipped.",
+      "assertion": {
+        "name": "starts_with-pass",
+        "type": "starts_with",
+        "value": "Dear customer",
+        "case_sensitive": true,
+        "required": true,
+        "weight": 1.0
+      },
+      "passed": true
+    },
+    {
+      "id": "starts_with-fail",
+      "description": "Value appears later, not at the start",
+      "tags": [],
+      "response": "Hello. Dear customer, your order shipped.",
+      "assertion": {
+        "name": "starts_with-fail",
+        "type": "starts_with",
+        "value": "Dear customer",
+        "case_sensitive": true,
+        "required": true,
+        "weight": 1.0
+      },
+      "passed": false
+    },
+    {
+      "id": "ends_with-pass",
+      "description": "Response closes with the value",
+      "tags": [],
+      "response": "Thanks for reading. Not financial advice.",
+      "assertion": {
+        "name": "ends_with-pass",
+        "type": "ends_with",
+        "value": "Not financial advice.",
+        "case_sensitive": true,
+        "required": true,
+        "weight": 1.0
+      },
+      "passed": true
+    },
+    {
+      "id": "ends_with-fail",
+      "description": "Trailing newline defeats ends_with",
+      "tags": [
+        "whitespace"
+      ],
+      "response": "Thanks for reading. Not financial advice.\n",
+      "assertion": {
+        "name": "ends_with-fail",
+        "type": "ends_with",
+        "value": "Not financial advice.",
+        "case_sensitive": true,
+        "required": true,
+        "weight": 1.0
+      },
+      "passed": false
+    },
+    {
+      "id": "contains_any-pass",
+      "description": "At least one alternative present",
+      "tags": [],
+      "response": "Please contact support for a refund.",
+      "assertion": {
+        "name": "contains_any-pass",
+        "type": "contains_any",
+        "value": [
+          "refund",
+          "chargeback",
+          "reversal"
+        ],
+        "case_sensitive": true,
+        "required": true,
+        "weight": 1.0
+      },
+      "passed": true
+    },
+    {
+      "id": "contains_any-fail",
+      "description": "No alternative present",
+      "tags": [],
+      "response": "Please contact support.",
+      "assertion": {
+        "name": "contains_any-fail",
+        "type": "contains_any",
+        "value": [
+          "refund",
+          "chargeback",
+          "reversal"
+        ],
+        "case_sensitive": true,
+        "required": true,
+        "weight": 1.0
+      },
+      "passed": false
+    },
+    {
+      "id": "contains_all-pass",
+      "description": "Every required phrase present",
+      "tags": [],
+      "response": "Risk warning: past performance is not indicative of future results.",
+      "assertion": {
+        "name": "contains_all-pass",
+        "type": "contains_all",
+        "value": [
+          "Risk warning",
+          "past performance"
+        ],
+        "case_sensitive": true,
+        "required": true,
+        "weight": 1.0
+      },
+      "passed": true
+    },
+    {
+      "id": "contains_all-fail",
+      "description": "One required phrase missing",
+      "tags": [],
+      "response": "Past performance is not indicative of future results.",
+      "assertion": {
+        "name": "contains_all-fail",
+        "type": "contains_all",
+        "value": [
+          "Risk warning",
+          "past performance"
+        ],
+        "case_sensitive": true,
+        "required": true,
+        "weight": 1.0
+      },
+      "passed": false
+    },
+    {
+      "id": "contains_all-casefold",
+      "description": "Case folding applies to every item in the list",
+      "tags": [
+        "casefold"
+      ],
+      "response": "RISK WARNING: PAST PERFORMANCE IS NOT INDICATIVE.",
+      "assertion": {
+        "name": "contains_all-casefold",
+        "type": "contains_all",
+        "value": [
+          "Risk warning",
+          "past performance"
+        ],
+        "case_sensitive": false,
+        "required": true,
+        "weight": 1.0
+      },
+      "passed": true
+    },
+    {
+      "id": "regex-pass",
+      "description": "Anchored pattern matches the whole response",
+      "tags": [
+        "regex"
+      ],
+      "response": "Order 10432 shipped",
+      "assertion": {
+        "name": "regex-pass",
+        "type": "regex",
+        "value": "^Order \\d+ shipped$",
+        "case_sensitive": true,
+        "required": true,
+        "weight": 1.0
+      },
+      "passed": true
+    },
+    {
+      "id": "regex-search-not-fullmatch",
+      "description": "regex searches anywhere; it does not require a full match",
+      "tags": [
+        "regex"
+      ],
+      "response": "Note: Order 10432 shipped today.",
+      "assertion": {
+        "name": "regex-search-not-fullmatch",
+        "type": "regex",
+        "value": "Order \\d+ shipped",
+        "case_sensitive": true,
+        "required": true,
+        "weight": 1.0
+      },
+      "passed": true
+    },
+    {
+      "id": "regex-fail",
+      "description": "Pattern absent",
+      "tags": [
+        "regex"
+      ],
+      "response": "Order pending",
+      "assertion": {
+        "name": "regex-fail",
+        "type": "regex",
+        "value": "Order \\d+ shipped",
+        "case_sensitive": true,
+        "required": true,
+        "weight": 1.0
+      },
+      "passed": false
+    },
+    {
+      "id": "regex-matches-raw-response",
+      "description": "regex runs against the raw response, so casefold's ß→ss never happens; compare with contains-casefold-sharp-s, which passes on the same input",
+      "tags": [
+        "regex",
+        "raw_response"
+      ],
+      "response": "Die Straße ist gesperrt.",
+      "assertion": {
+        "name": "regex-matches-raw-response",
+        "type": "regex",
+        "value": "strasse",
+        "case_sensitive": false,
+        "required": true,
+        "weight": 1.0
+      },
+      "passed": false
+    },
+    {
+      "id": "regex-ignorecase",
+      "description": "case_sensitive=false becomes re.IGNORECASE, not a normalized comparison",
+      "tags": [
+        "regex",
+        "raw_response"
+      ],
+      "response": "REFUND issued",
+      "assertion": {
+        "name": "regex-ignorecase",
+        "type": "regex",
+        "value": "refund",
+        "case_sensitive": false,
+        "required": true,
+        "weight": 1.0
+      },
+      "passed": true
+    },
+    {
+      "id": "regex-python-inline-flag",
+      "description": "Python re accepts an inline (?i) flag that most other dialects reject",
+      "tags": [
+        "regex",
+        "python_re_only"
+      ],
+      "response": "REFUND issued",
+      "assertion": {
+        "name": "regex-python-inline-flag",
+        "type": "regex",
+        "value": "(?i)refund",
+        "case_sensitive": true,
+        "required": true,
+        "weight": 1.0
+      },
+      "passed": true
+    },
+    {
+      "id": "min_length-pass",
+      "description": "Response is long enough",
+      "tags": [],
+      "response": "A sufficiently detailed answer.",
+      "assertion": {
+        "name": "min_length-pass",
+        "type": "min_length",
+        "value": 10,
+        "case_sensitive": true,
+        "required": true,
+        "weight": 1.0
+      },
+      "passed": true
+    },
+    {
+      "id": "min_length-fail",
+      "description": "Response is too short",
+      "tags": [],
+      "response": "Too short.",
+      "assertion": {
+        "name": "min_length-fail",
+        "type": "min_length",
+        "value": 50,
+        "case_sensitive": true,
+        "required": true,
+        "weight": 1.0
+      },
+      "passed": false
+    },
+    {
+      "id": "min_length-boundary",
+      "description": "Bound is inclusive",
+      "tags": [],
+      "response": "0123456789",
+      "assertion": {
+        "name": "min_length-boundary",
+        "type": "min_length",
+        "value": 10,
+        "case_sensitive": true,
+        "required": true,
+        "weight": 1.0
+      },
+      "passed": true
+    },
+    {
+      "id": "min_length-code-points",
+      "description": "Three astral emoji are 3 code points, not the 6 UTF-16 units JS reports",
+      "tags": [
+        "code_points"
+      ],
+      "response": "👍👍👍",
+      "assertion": {
+        "name": "min_length-code-points",
+        "type": "min_length",
+        "value": 4,
+        "case_sensitive": true,
+        "required": true,
+        "weight": 1.0
+      },
+      "passed": false
+    },
+    {
+      "id": "max_length-pass",
+      "description": "Response is short enough",
+      "tags": [],
+      "response": "Brief.",
+      "assertion": {
+        "name": "max_length-pass",
+        "type": "max_length",
+        "value": 20,
+        "case_sensitive": true,
+        "required": true,
+        "weight": 1.0
+      },
+      "passed": true
+    },
+    {
+      "id": "max_length-fail",
+      "description": "Response is too long",
+      "tags": [],
+      "response": "This response runs well past the configured maximum length.",
+      "assertion": {
+        "name": "max_length-fail",
+        "type": "max_length",
+        "value": 20,
+        "case_sensitive": true,
+        "required": true,
+        "weight": 1.0
+      },
+      "passed": false
+    },
+    {
+      "id": "max_length-code-points",
+      "description": "Three astral emoji fit a max_length of 3",
+      "tags": [
+        "code_points"
+      ],
+      "response": "👍👍👍",
+      "assertion": {
+        "name": "max_length-code-points",
+        "type": "max_length",
+        "value": 3,
+        "case_sensitive": true,
+        "required": true,
+        "weight": 1.0
+      },
+      "passed": true
+    },
+    {
+      "id": "max_length-zwj-sequence",
+      "description": "A ZWJ family emoji is 5 code points: three emoji joined by two ZWJs",
+      "tags": [
+        "code_points"
+      ],
+      "response": "👨‍👩‍👧",
+      "assertion": {
+        "name": "max_length-zwj-sequence",
+        "type": "max_length",
+        "value": 5,
+        "case_sensitive": true,
+        "required": true,
+        "weight": 1.0
+      },
+      "passed": true
+    }
+  ]
+}

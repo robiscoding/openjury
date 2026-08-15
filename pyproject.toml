@@ -63,7 +63,7 @@ path = "src/openjury/__init__.py"
 packages = ["src/openjury"]
 
 [tool.hatch.build.targets.sdist]
-include = ["/src", "/tests", "/README.md", "/LICENSE"]
+include = ["/src", "/tests", "/docs", "/scripts", "/README.md", "/LICENSE"]
 
 [tool.ruff]
 line-length = 88

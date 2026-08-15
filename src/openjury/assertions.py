@@ -1,7 +1,33 @@
-import re
-from typing import List, Tuple
+"""Evaluate deterministic checks against an agent response.
 
-from openjury.config import AssertionConfig, AssertionType
+Semantics that a reimplementation in another language will get wrong unless it
+is deliberate about them. `docs/assertion_conformance.json` pins all of them as
+data; regenerate it with `python scripts/export_assertion_conformance.py`.
+
+- Case-insensitive matching uses `str.casefold()`, not a plain lowercase.
+  Casefold is more aggressive: `ß` folds to `ss`, `ﬁ` to `fi`, final sigma `ς`
+  to `σ`. It is locale-independent, so Turkish dotless `ı` does not fold
+  together with `I`.
+- `min_length` / `max_length` count what `len()` counts: Unicode code points.
+  An astral character such as an emoji costs 1, not the 2 UTF-16 units a
+  JavaScript `.length` would report.
+- `regex` matches the **raw** response, not the case-normalized one — unlike
+  every other type. With `case_sensitive=false` it applies `re.IGNORECASE`
+  instead, which is not equivalent to casefolding both sides.
+- `regex` patterns are Python `re`. Other regex dialects do not accept the same
+  language (inline flags such as `(?i)`, `\\Z`, named-group syntax), so a port
+  cannot match this type in general and should treat it as advisory.
+"""
+
+import re
+from typing import List, Optional, Tuple
+
+from openjury.config import (
+    AssertionConfig,
+    AssertionScope,
+    AssertionType,
+    ResolvedAssertion,
+)
 from openjury.output_format import AssertionResult
 
 
@@ -9,10 +35,25 @@ def _normalize(value: str, case_sensitive: bool) -> str:
     return value if case_sensitive else value.casefold()
 
 
+def _origin(assertion: AssertionConfig) -> Tuple[AssertionScope, Optional[str]]:
+    """Return the (scope, profile_id) of a check.
+
+    Assertions handed straight to this function rather than through
+    `resolve_item_assertions` carry no origin; they applied to whatever the
+    caller passed, which is what 'global' means.
+    """
+    if isinstance(assertion, ResolvedAssertion):
+        return assertion.scope, assertion.profile_id
+    return "global", None
+
+
 def evaluate_assertions(
     response_text: str, assertions: List[AssertionConfig]
 ) -> List[AssertionResult]:
-    """Evaluate configured deterministic assertions against a response."""
+    """Evaluate configured deterministic assertions against a response.
+
+    See the module docstring for the matching semantics each type commits to.
+    """
     results: List[AssertionResult] = []
 
     for assertion in assertions:
@@ -72,6 +113,7 @@ def evaluate_assertions(
             if passed
             else f"{assertion.type.value} assertion failed for {value!r}"
         )
+        scope, profile_id = _origin(assertion)
         results.append(
             AssertionResult(
                 name=assertion.name,
@@ -81,6 +123,8 @@ def evaluate_assertions(
                 detail=detail,
                 required=assertion.required,
                 weight=assertion.weight,
+                scope=scope,
+                profile_id=profile_id,
             )
         )
 
@@ -93,6 +137,12 @@ def score_assertions(
     """Return weighted pass rate and whether every required assertion passed.
 
     An empty assertion set is treated as fully satisfied.
+
+    The returned flag is only half of the assertion verdict. It answers "did
+    every check marked `required=True` pass?" and nothing else. A configured
+    `assertion_threshold` is applied separately against the returned pass rate
+    and surfaces as `AgentEvalResult.assertion_threshold_met`; a consumer that
+    reads only `assertions_passed` silently ignores it.
     """
     if not results:
         return 1.0, True

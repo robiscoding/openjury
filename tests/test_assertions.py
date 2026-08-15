@@ -2,7 +2,12 @@ import pytest
 from pydantic import ValidationError
 
 from openjury.assertions import evaluate_assertions, score_assertions
-from openjury.config import AssertionConfig, AssertionType, JuryConfig
+from openjury.config import (
+    AssertionConfig,
+    AssertionType,
+    JuryConfig,
+    ResolvedAssertion,
+)
 from openjury.output_format import AssertionResult
 
 
@@ -203,3 +208,26 @@ def test_assertion_type_enum_lists_all_supported_types() -> None:
         "min_length",
         "max_length",
     }
+
+
+def test_result_carries_scope_from_a_resolved_assertion() -> None:
+    check = ResolvedAssertion.from_assertion(
+        AssertionConfig(name="contract", type="contains", value="CONF-"),
+        "profile",
+        "contract",
+    )
+
+    (result,) = evaluate_assertions("CONF-1", [check])
+
+    assert result.scope == "profile"
+    assert result.profile_id == "contract"
+
+
+def test_untagged_assertion_defaults_to_global_scope() -> None:
+    """A check handed straight in applied to whatever the caller passed."""
+    check = AssertionConfig(name="contract", type="contains", value="CONF-")
+
+    (result,) = evaluate_assertions("CONF-1", [check])
+
+    assert result.scope == "global"
+    assert result.profile_id is None

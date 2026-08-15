@@ -17,6 +17,7 @@ from openjury.config import (
     AssertionConfig,
     AssertionPolicyDefaults,
     AssertionProfileConfig,
+    AssertionScope,
     AssertionType,
     CriterionConfig,
     DatasetItemConfig,
@@ -24,6 +25,7 @@ from openjury.config import (
     JurorProvider,
     JuryConfig,
     LLMProviderConfig,
+    ResolvedAssertion,
     VotingCriteria,
 )
 from openjury.endpoint_fetcher import (
@@ -83,7 +85,7 @@ from openjury.scoring import (
     TokenUsage,
 )
 
-__version__ = "0.7.1"
+__version__ = "0.8.0"
 __all__ = [
     # Core engine
     "OpenJury",
@@ -99,6 +101,8 @@ __all__ = [
     "AssertionPolicyDefaults",
     "DatasetItemConfig",
     "AssertionType",
+    "AssertionScope",
+    "ResolvedAssertion",
     "resolve_item_assertions",
     "evaluate_assertions",
     "score_assertions",

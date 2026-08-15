@@ -1,6 +1,8 @@
 {
   "$defs": {
     "AssertionConfig": {
+      "additionalProperties": false,
+      "description": "One deterministic check applied to an agent response.\n\nRejects unknown fields: a misspelled key is a check that would never run.",
       "properties": {
         "name": {
           "description": "Name or identifier for this assertion",
@@ -58,6 +60,7 @@
       "type": "object"
     },
     "AssertionPolicyDefaults": {
+      "additionalProperties": false,
       "description": "Default pass thresholds applied when no item or profile override is set.",
       "properties": {
         "assertion_threshold": {
@@ -92,6 +95,7 @@
       "type": "object"
     },
     "AssertionProfileConfig": {
+      "additionalProperties": false,
       "description": "A reusable group of deterministic checks and optional pass thresholds.",
       "properties": {
         "name": {
@@ -169,6 +173,7 @@
       "type": "string"
     },
     "CriterionConfig": {
+      "additionalProperties": false,
       "properties": {
         "name": {
           "description": "Name of the criterion (free-form string)",
@@ -212,6 +217,7 @@
       "type": "object"
     },
     "DatasetItemConfig": {
+      "additionalProperties": false,
       "description": "One row in an inline config dataset.",
       "properties": {
         "id": {
@@ -297,6 +303,7 @@
       "type": "object"
     },
     "JurorConfig": {
+      "additionalProperties": false,
       "properties": {
         "name": {
           "description": "Name or identifier for this juror",
@@ -412,6 +419,7 @@
       "type": "string"
     },
     "LLMProviderConfig": {
+      "additionalProperties": false,
       "properties": {
         "provider": {
           "$ref": "#/$defs/JurorProvider",
@@ -464,6 +472,8 @@
       "type": "object"
     }
   },
+  "additionalProperties": false,
+  "description": "Top-level jury configuration.\n\nUnknown fields are rejected. A config that names a field OpenJury does not\nmodel is almost always a typo or a stale key, and silently ignoring it means\nrunning an evaluation that checks less than the author asked for.",
   "properties": {
     "name": {
       "description": "Name for this jury configuration",
@@ -504,7 +514,7 @@
       "type": "array"
     },
     "global_assertions": {
-      "description": "Deterministic checks applied automatically to every dataset item",
+      "description": "Deterministic checks applied automatically to every dataset item; accepts 'assertions' as an input alias",
       "items": {
         "$ref": "#/$defs/AssertionConfig"
       },
