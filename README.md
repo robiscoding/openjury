@@ -10,11 +10,12 @@
 
 ## Overview
 
-OpenJury is an agent evaluation framework. Point it at your agent's HTTP endpoint and it will:
+OpenJury is an agent evaluation and LLM-as-judge framework. Point it at your agent's HTTP endpoint and it will:
 
 1. Send a prompt to your agent and collect the response
 2. Pass the response to a panel of LLM judges (jurors), each scoring it against your criteria
 3. Return a composite quality score with a full statistical breakdown
+4. Provide a measurement of your judge's quality
 
 The primary output is a single `composite_score` — a weighted mean of all juror scores across all criteria, plus eight additional canned metrics (median, harmonic mean, weakest link, juror agreement, and more). You can also register a custom scoring function for domain-specific logic.
 
@@ -23,6 +24,13 @@ The primary output is a single `composite_score` — a weighted mean of all juro
 Relying on one LLM to evaluate outputs is common but fragile: it's expensive and prone to [intra-model bias](https://arxiv.org/abs/2404.13076). Research from Cohere [shows](https://arxiv.org/abs/2404.18796) that a panel of smaller, diverse models produces more reliable and less biased evaluations at lower cost.
 
 OpenJury makes this practical: configure jurors declaratively in JSON, wire rubrics per criterion for consistent scoring, and get a structured result you can act on.
+
+|  | Single LLM judge | OpenJury (jury of judges) |
+|---|---|---|
+| **Bias** | One model's blind spots become your only signal | Diverse jurors dilute any single model's bias |
+| **Confidence** | No way to tell "confidently wrong" from "right" | `juror_agreement` surfaces disagreement automatically |
+| **Failure visibility** | A bad composite can hide behind a good average | `weakest_link` flags standout failures even when the average looks fine |
+| **Cost** | Often needs a large, expensive judge model | A panel of smaller models can match or beat one large judge |
 
 ---
 
@@ -208,6 +216,14 @@ openjury run \
 Full index: [examples/README.md](examples/README.md)
 
 ---
+ 
+## Using OpenJury in production?
+ 
+This repo is the complete open-source engine for running your evals. Everything above works standalone, no account required.
+
+If you want a fully hosted solution with managed infrastructure, dashboards, historical score trends across model/prompt versions, team collaboration, and alerting on top of it, checkout out **[Evalibrate](https://www.evalibrate.com)**, built directly on OpenJury.
+ 
+---
 
 ## Troubleshooting
 
@@ -259,3 +275,5 @@ Apache License 2.0. See [LICENSE](LICENSE).
 ## Contributing
 
 Contributions welcome! See [CONTRIBUTING.md](CONTRIBUTING.md).
+
+Questions or ideas? Open a [GitHub Discussion](../../discussions) or [issue](../../issues)
