@@ -2,6 +2,7 @@
 
 **A Python SDK for evaluating your agent's response quality using a configurable panel of LLM judges.**
 
+[![PyPI version](https://img.shields.io/pypi/v/evalibrate.svg)](https://pypi.org/project/evalibrate/)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
